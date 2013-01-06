@@ -59,7 +59,7 @@ struct window {
 };
 
 struct port {
-   char name[64];
+   char name[128];
    char type[32];
    int flags;
 };
