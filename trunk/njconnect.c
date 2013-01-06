@@ -155,7 +155,7 @@ build_connections(jack_client_t* client, JSList* list_ptr, const char* type) {
        if(! (inp->flags & JackPortIsInput)) continue;
        if( strcmp(inp->type, type) != 0 ) continue;
 
-       connections = jack_port_get_connections( jack_port_by_name(client, inp->name) );
+       connections = jack_port_get_all_connections( client, jack_port_by_name(client, inp->name) );
        if (!connections) continue;
 
        for (i=0; connections[i]; i++) {
