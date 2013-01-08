@@ -80,8 +80,8 @@ JSList* jack_slist_nth(JSList* list_ptr, unsigned short n) {
    unsigned short i = 0;
    JSList* node;
 
-   for(node=list_ptr; node ; node = jack_slist_next(node) )
-      if (i++ == n) return node;
+   for(node=list_ptr; node ; node = jack_slist_next(node), i++ )
+      if (i == n) return node;
    return NULL;
 }
 
@@ -193,7 +193,8 @@ void draw_border(struct window * window_ptr) {
 }
 
 void draw_list(struct window* window_ptr) {
-  int row, col, color, rows, cols, offset;
+  unsigned short row, col, color, rows, cols;
+  short offset;
   JSList* node;
   struct port* p;
   struct connection* c;
@@ -201,12 +202,9 @@ void draw_list(struct window* window_ptr) {
 
   row = col = 1;
   getmaxyx(window_ptr->window_ptr, rows, cols);
-  snprintf(fmt, sizeof(fmt), "%%%ds -> %%-%ds", cols/2 - 3, cols/2 - 3);
-
-  offset = window_ptr->index + 2 - rows;
-  if (offset < 0) offset = 0;
-  node = (offset) ? jack_slist_nth(window_ptr->list_ptr, offset) : window_ptr->list_ptr;
-  for ( ; node; node=jack_slist_next(node) ) {
+  offset = window_ptr->index + 3 - rows; // first displayed index
+  if(offset < 0) offset = 0;
+  for ( node=jack_slist_nth(window_ptr->list_ptr,offset); node; node=jack_slist_next(node) ) {
     color = (row == window_ptr->index - offset + 1) ? (window_ptr->selected) ? 3 : 2 : 1;
     wattron(window_ptr->window_ptr, COLOR_PAIR(color));
 
@@ -217,13 +215,14 @@ void draw_list(struct window* window_ptr) {
        break;
     case WIN_CONNECTIONS:
        c = node->data;
+       snprintf(fmt, sizeof(fmt), "%%%ds -> %%-%ds", cols/2 - 3, cols/2 - 3);
        mvwprintw(window_ptr->window_ptr, row, col, fmt, c->out->name, c->in->name);
        break;
     default:
        ERR_OUT("Unknown WinType");
     }
-
     wattroff(window_ptr->window_ptr, COLOR_PAIR(color));
+    wclrtoeol(window_ptr->window_ptr);
     row++;
   }
   draw_border(window_ptr);
