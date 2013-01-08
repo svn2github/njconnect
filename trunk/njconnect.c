@@ -91,14 +91,14 @@ void window_item_previous(struct window* w) { if (w->index > 0) w->index--; }
 JSList* build_ports(jack_client_t* client) {
    JSList* new = NULL;
    jack_port_t* jp;
-   unsigned short i, size=0;
+   unsigned short i, count=0;
    struct port* p;
 
    const char** jports = jack_get_ports (client, NULL, NULL, 0);
    if(! jports) return NULL;
 
-   while(jports[size]) size++;
-   p = calloc(size, sizeof(struct port));
+   while(jports[count]) count++;
+   p = calloc(count, sizeof(struct port));
 
    for (i=0; jports[i]; ++i, p++) {
        jp = jack_port_by_name( client, jports[i] );
@@ -457,6 +457,7 @@ refresh:
 
   for(i=0; i < 3; i++) {
      windows[i].count = jack_slist_length( windows[i].list_ptr );
+     if (windows[i].index > windows[i].count - 1) windows[i].index = 0;
      wclear(windows[i].window_ptr);
   }
 

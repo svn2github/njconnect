@@ -2,6 +2,11 @@ Requirements:
   * ncurses
   * jack-audio-connection-kit (jack1 or jack2)
 
+NOTE:
+On some distros there a lack of jslist.h header.
+If expirience this, then please report this to Jack packager
+and/or Jack Devels
+
 Building: (should work at least with GNU and BSD make)
   make
 
