@@ -461,10 +461,10 @@ refresh:
   }
 
   goto loop;
-quit_no_clean:
+quit:
   free_all_ports(all_list);
   cleanup(windows);
-quit:
+quit_no_clean:
   jack_deactivate(client);
   jack_client_close (client);
 qxit:
