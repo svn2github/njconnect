@@ -182,11 +182,9 @@ void draw_border(struct window * window_ptr) {
   box(window_ptr->window_ptr, 0, 0);
 
   if (window_ptr->selected) {
-     wattron(window_ptr->window_ptr, COLOR_PAIR(4));
-     wattron(window_ptr->window_ptr, WA_BOLD);
+     wattron(window_ptr->window_ptr, WA_BOLD|COLOR_PAIR(4));
      mvwprintw( window_ptr->window_ptr, 0, col, "=[%s]=", window_ptr->name);
-     wattroff(window_ptr->window_ptr, COLOR_PAIR(4));
-     wattroff(window_ptr->window_ptr, WA_BOLD);
+     wattroff(window_ptr->window_ptr, WA_BOLD|COLOR_PAIR(4));
   } else {
      mvwprintw( window_ptr->window_ptr, 0, col, " [%s] ", window_ptr->name);
   }
@@ -324,15 +322,24 @@ int graph_order_handler(void *arg) {
     return 0;
 }
 
-void draw_help(WINDOW* w, int c, const char* msg) {
+void draw_help(WINDOW* w, int c, const char* msg, float dsp_load, bool rt) {
+    unsigned short cols;
+    cols = getmaxx(w);
+
+    wmove(w, 0, 0);
+    wclrtoeol(w);
+
     wattron(w, COLOR_PAIR(c));
     mvwprintw(w, 0, 1, msg);
     wattroff(w, COLOR_PAIR(c));
 
-    wclrtoeol(w);
+    wattron(w, COLOR_PAIR(7));
+    mvwprintw(w, 0, cols-12, "DSP:%4.2f%s", dsp_load, rt ? "@RT" : "!RT" );
+    wattroff(w, COLOR_PAIR(7));
+
     wrefresh(w);
-    wmove(w, 0, 0);
 }
+
 
 int main() {
   unsigned short i, ret, rows, cols, window_selection=0;
@@ -344,6 +351,7 @@ int main() {
   jack_status_t status;
   JSList *all_list = NULL;
   bool want_refresh = FALSE;
+  bool rt;
   struct graph g = { &want_refresh, &err_message };
 
   /* Initialize ncurses */
@@ -365,6 +373,7 @@ int main() {
   init_pair(4, COLOR_WHITE, COLOR_BLACK);
   init_pair(5, COLOR_BLACK, COLOR_RED);
   init_pair(6, COLOR_YELLOW, COLOR_BLACK);
+  init_pair(7, COLOR_BLUE, COLOR_BLACK);
 
   /* Create Help Window */
   help_window = newwin(0, cols, rows-1, 0);
@@ -380,6 +389,7 @@ int main() {
     goto quit_no_clean;
   }
 
+  rt = (bool) jack_is_realtime(client);
   jack_set_graph_order_callback(client, graph_order_handler, &g);
   jack_activate(client);
 
@@ -399,10 +409,10 @@ loop:
   for (i=0; i < 3; i++) draw_list(windows+i);
 
   if (err_message) {
-    draw_help(help_window, 5, err_message);
+    draw_help(help_window, 5, err_message, jack_cpu_load(client), rt);
     err_message = NULL;
   } else {
-    draw_help(help_window, 6, HELP);
+    draw_help(help_window, 6, HELP, jack_cpu_load(client), rt);
   }
 
   switch ( wgetch(help_window) ) {
