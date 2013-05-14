@@ -38,6 +38,26 @@
 #define HELP "'q'uit, U/D-list selection, L/R-panels, TAB-focus, 'm'idi, 'a'udio, 'r'efresh, 'c'onnect, 'd'isconnect"
 #define KEY_TAB '\t'
 
+#define WOUT_X 0
+#define WOUT_Y 0
+#define WOUT_W cols / 2
+#define WOUT_H rows / 2
+
+#define WIN_X cols / 2
+#define WIN_Y 0
+#define WIN_W cols - cols / 2
+#define WIN_H rows / 2
+
+#define WCON_X 0
+#define WCON_Y rows / 2
+#define WCON_W cols
+#define WCON_H rows - rows / 2 - 1
+
+#define WHLP_X 0
+#define WHLP_Y rows - 1
+#define WHLP_W cols
+#define WHLP_H 0
+
 #define MSG_OUT(format, arg...) printf(format "\n", ## arg)
 #define ERR_OUT(format, arg...) fprintf(stderr, format "\n", ## arg)
 
@@ -241,6 +261,16 @@ create_window(struct window * window_ptr, int height, int width, int starty, int
 //  scrollok(window_ptr->window_ptr, TRUE);
 }
 
+void
+resize_window(struct window * window_ptr, int height, int width, int starty, int startx) {
+//  delwin(window_ptr->window_ptr);
+//  window_ptr->window_ptr = newwin(height, width, starty, startx);
+  wresize(window_ptr->window_ptr, height, width);
+  mvwin(window_ptr->window_ptr, starty, startx);
+  window_ptr->width = width;
+  window_ptr->height = height;
+}
+
 const char*
 get_selected_port_name(struct window* window_ptr) {
    JSList* list = jack_slist_nth(window_ptr->list_ptr, window_ptr->index);
@@ -376,7 +406,7 @@ int main() {
   init_pair(7, COLOR_BLUE, COLOR_BLACK);
 
   /* Create Help Window */
-  help_window = newwin(0, cols, rows-1, 0);
+  help_window = newwin(WHLP_H, WHLP_W, WHLP_Y, WHLP_X);
   keypad(help_window, TRUE);
   wtimeout(help_window, 3000);
 
@@ -400,9 +430,9 @@ int main() {
   windows[2].list_ptr = build_connections(client, all_list, PortsType);
 
   /* Create windows */
-  create_window(windows, rows/2, cols/2, 0, 0, "Output Ports", WIN_PORTS);
-  create_window(windows+1, rows/2, cols - cols/2, 0, cols/2, "Input Ports", WIN_PORTS);
-  create_window(windows+2, rows-rows/2-1, cols, rows/2, 0, CON_NAME_M, WIN_CONNECTIONS);
+  create_window(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_Y, "Output Ports", WIN_PORTS);
+  create_window(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X, "Input Ports", WIN_PORTS);
+  create_window(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X, CON_NAME_M, WIN_CONNECTIONS);
   windows[window_selection].selected = TRUE;
 
 loop:
@@ -431,7 +461,15 @@ loop:
      PortsType = JACK_DEFAULT_MIDI_TYPE;
      goto refresh;
   case 'q': ret =0; goto quit;
-  case 'r': goto refresh;
+  case 'r':
+  case KEY_RESIZE:
+    getmaxyx(stdscr, rows, cols);
+    wresize(help_window, WHLP_H, WHLP_W);
+    mvwin(help_window, WHLP_Y, WHLP_X);
+    resize_window(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_X);
+    resize_window(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X);
+    resize_window(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X);
+    goto refresh;
   case 'c':
     if ( w_connect(client, windows, windows+1) ) goto refresh;
     err_message = ERR_CONNECT;
