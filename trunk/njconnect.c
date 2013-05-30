@@ -95,7 +95,7 @@ struct graph {
    const char** err_message;
 };
 
-/* Functions forgotten by Jack-Devs */
+/* Function forgotten by Jack-Devs */
 JSList* jack_slist_nth(JSList* list_ptr, unsigned short n) {
    unsigned short i = 0;
    JSList* node;
@@ -107,6 +107,10 @@ JSList* jack_slist_nth(JSList* list_ptr, unsigned short n) {
 
 void window_item_next(struct window* w) { if (w->index < w->count - 1) w->index++; }
 void window_item_previous(struct window* w) { if (w->index > 0) w->index--; }
+
+void suppress_jack_log(const char* msg) {
+	/* Just suppress Jack SPAM here ;-) */
+}
 
 JSList* build_ports(jack_client_t* client) {
    JSList* new = NULL;
@@ -278,7 +282,6 @@ get_selected_port_name(struct window* window_ptr) {
    return p->name;
 }
 
-
 bool
 w_connect(jack_client_t* client, struct window* window_src_ptr, struct window* window_dst_ptr) {
    const char* src = get_selected_port_name(window_src_ptr);
@@ -409,6 +412,10 @@ int main() {
   help_window = newwin(WHLP_H, WHLP_W, WHLP_Y, WHLP_X);
   keypad(help_window, TRUE);
   wtimeout(help_window, 3000);
+
+  /* Some Jack versions are very aggressive in breaking view */
+  jack_set_info_function(suppress_jack_log);
+  jack_set_error_function(suppress_jack_log);
 
   /* Initialize jack */
   client = jack_client_open (APPNAME, JackNoStartServer, &status);
