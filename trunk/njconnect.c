@@ -3,7 +3,8 @@
  *
  * ncurses Jack patchbay
  *
- * Copyright (C) 2012 Xj <xj@wp.pl>
+ * Copyright (C) 2012-2013 Xj <xj@wp.pl>
+ *   with lots of patches from G.raud Meyer
  *
  * based on naconnect by Nedko Arnaudov <nedko@arnaudov.name>
  *
@@ -35,7 +36,7 @@
 #define ERR_CONNECT "Connection failed"
 #define ERR_DISCONNECT "Disconnection failed"
 #define GRAPH_CHANGED "Graph changed"
-#define HELP "'q'uit, U/D-list selection, L/R-panels, TAB-focus, 'm'idi, 'a'udio, 'r'efresh, 'c'onnect, 'd'isconnect"
+#define HELP "'q'uit, U/D-list selection, L/R-panels, TAB-focus, 'm'idi, 'a'udio, 'r'efresh, 'c'onnect, 'd/D'isconnect"
 #define KEY_TAB '\t'
 
 #define WOUT_X 0
@@ -59,7 +60,7 @@
 #define WHLP_H 0
 
 #define MSG_OUT(format, arg...) printf(format "\n", ## arg)
-#define ERR_OUT(format, arg...) fprintf(stderr, format "\n", ## arg)
+#define ERR_OUT(format, arg...) ( endwin(), fprintf(stderr, format "\n", ## arg), refresh() )
 
 enum WinType {
    WIN_PORTS,
@@ -220,7 +221,7 @@ void draw_list(struct window* window_ptr) {
   JSList* node;
   struct port* p;
   struct connection* c;
-  char fmt[20];
+  char fmt[40];
 
   row = col = 1;
   getmaxyx(window_ptr->window_ptr, rows, cols);
@@ -233,11 +234,13 @@ void draw_list(struct window* window_ptr) {
     switch(window_ptr->type) {
     case WIN_PORTS:
        p = node->data;
-       mvwprintw(window_ptr->window_ptr, row, col, p->name);
+       snprintf(fmt, sizeof(fmt), "%%-%d.%ds", cols - 2, cols - 2);
+       mvwprintw(window_ptr->window_ptr, row, col, fmt, p->name);
        break;
     case WIN_CONNECTIONS:
        c = node->data;
-       snprintf(fmt, sizeof(fmt), "%%%ds -> %%-%ds", cols/2 - 3, cols/2 - 3);
+       snprintf(fmt, sizeof(fmt), "%%%d.%ds -> %%-%d.%ds",
+                cols/2 - 3, cols/2 - 3, cols/2 - 3, cols/2 - 3);
        mvwprintw(window_ptr->window_ptr, row, col, fmt, c->out->name, c->in->name);
        break;
     default:
@@ -278,6 +281,7 @@ resize_window(struct window * window_ptr, int height, int width, int starty, int
 const char*
 get_selected_port_name(struct window* window_ptr) {
    JSList* list = jack_slist_nth(window_ptr->list_ptr, window_ptr->index);
+   if (!list) return NULL;
    struct port* p = list->data;
    return p->name;
 }
@@ -303,7 +307,8 @@ w_disconnect(jack_client_t* client, struct window* window_ptr) {
    if (! list) return FALSE;
 
    struct connection* c = list->data;
-   window_ptr->index = 0;
+   if (window_ptr->index >= window_ptr->count - 1 && window_ptr->index)
+      window_ptr->index--;
    return jack_disconnect(client, c->out->name, c->in->name) ? FALSE : TRUE;
 }
 
@@ -454,19 +459,22 @@ loop:
 
   switch ( wgetch(help_window) ) {
   case KEY_TAB:
+  case 'J':
     window_selection = select_window(windows, window_selection, window_selection+1);
     goto loop;
   case KEY_BTAB:
+  case 'K':
     window_selection = select_window(windows, window_selection, window_selection-1);
     goto loop;
   case 'a':
-     windows[2].name = CON_NAME_A;
-     PortsType = JACK_DEFAULT_AUDIO_TYPE;
-     goto refresh;
+    windows[2].name = CON_NAME_A;
+    PortsType = JACK_DEFAULT_AUDIO_TYPE;
+    goto refresh;
   case 'm':
-     windows[2].name = CON_NAME_M;
-     PortsType = JACK_DEFAULT_MIDI_TYPE;
-     goto refresh;
+    windows[2].name = CON_NAME_M;
+    PortsType = JACK_DEFAULT_MIDI_TYPE;
+    goto refresh;
+  case KEY_EXIT:
   case 'q': ret =0; goto quit;
   case 'r':
   case KEY_RESIZE:
@@ -478,25 +486,48 @@ loop:
     resize_window(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X);
     goto refresh;
   case 'c':
+  case '\n':
+  case KEY_ENTER:
     if ( w_connect(client, windows, windows+1) ) goto refresh;
     err_message = ERR_CONNECT;
     goto loop;
   case 'd':
+  case KEY_BACKSPACE:
     if (w_disconnect(client, windows+2) ) goto refresh;
     err_message = ERR_DISCONNECT;
     goto loop;
+  case 'D':
+    while (w_disconnect(client, windows+2) ) {
+      windows[2].list_ptr = jack_slist_remove(windows[2].list_ptr,
+          jack_slist_nth(windows[2].list_ptr, windows[2].index)->data);
+      windows[2].count--;
+    }
+    goto refresh;
   case KEY_DOWN:
-     window_item_next(windows+window_selection);
-     goto loop;
+  case 'j':
+    window_item_next(windows+window_selection);
+    goto loop;
   case KEY_UP:
-     window_item_previous(windows+window_selection);
-     goto loop;
+  case 'k':
+    window_item_previous(windows+window_selection);
+    goto loop;
+  case KEY_HOME:
+    (windows+window_selection)->index = 0;
+    goto loop;
+  case KEY_END:
+    (windows+window_selection)->index = (windows+window_selection)->count - 1;
+    goto loop;
   case KEY_LEFT:
-     window_selection = select_window(windows, window_selection, 0);
-     goto loop;
+  case 'h':
+    window_selection = select_window(windows, window_selection, 0);
+    goto loop;
   case KEY_RIGHT:
-     window_selection = select_window(windows, window_selection, 1);
-     goto loop;
+  case 'l':
+    window_selection = select_window(windows, window_selection, 1);
+    goto loop;
+  case ' ':
+    window_selection = select_window(windows, window_selection, 2);
+    goto loop;
   }
   if (! want_refresh) goto loop;
 refresh:
