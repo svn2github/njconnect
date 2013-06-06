@@ -30,13 +30,14 @@
 #include <stdbool.h>
 
 #define APPNAME "njconnect"
+#define VERSION "1.3"
 #define CON_NAME_A "Audio Connections"
 #define CON_NAME_M "MIDI Connections"
 
 #define ERR_CONNECT "Connection failed"
 #define ERR_DISCONNECT "Disconnection failed"
 #define GRAPH_CHANGED "Graph changed"
-#define HELP "'q'uit, U/D-list selection, L/R-panels, TAB-focus, 'm'idi, 'a'udio, 'r'efresh, 'c'onnect, 'd/D'isconnect"
+#define DEFAULT_STATUS "->> Press SHIFT+H or ? for help << -"
 #define KEY_TAB '\t'
 
 #define WOUT_X 0
@@ -54,10 +55,10 @@
 #define WCON_W cols
 #define WCON_H rows - rows / 2 - 1
 
-#define WHLP_X 0
-#define WHLP_Y rows - 1
-#define WHLP_W cols
-#define WHLP_H 0
+#define WSTAT_X 0
+#define WSTAT_Y rows - 1
+#define WSTAT_W cols
+#define WSTAT_H 0
 
 #define MSG_OUT(format, arg...) printf(format "\n", ## arg)
 #define ERR_OUT(format, arg...) ( endwin(), fprintf(stderr, format "\n", ## arg), refresh() )
@@ -128,7 +129,6 @@ JSList* build_ports(jack_client_t* client) {
    for (i=0; jports[i]; ++i, p++) {
        jp = jack_port_by_name( client, jports[i] );
 
-//       p = malloc(sizeof(struct port));
        strncpy(p->name, jports[i], sizeof(p->name));
        strncpy(p->type, jack_port_type( jp ), sizeof(p->type));
        p->flags = jack_port_flags( jp );
@@ -360,7 +360,7 @@ int graph_order_handler(void *arg) {
     return 0;
 }
 
-void draw_help(WINDOW* w, int c, const char* msg, float dsp_load, bool rt) {
+void draw_status(WINDOW* w, int c, const char* msg, float dsp_load, bool rt) {
     unsigned short cols;
     cols = getmaxx(w);
 
@@ -378,11 +378,62 @@ void draw_help(WINDOW* w, int c, const char* msg, float dsp_load, bool rt) {
     wrefresh(w);
 }
 
+struct help {
+	const char* keys;
+	const char* action;
+};
+
+void show_help() {
+    WINDOW* w = newwin(24, 80, 0, 0);
+
+    struct help h[] = {
+       { "a", "manage audio" },
+       { "m", "manage MIDI" },
+       { "TAB / SHIFT + j", "select next window" },
+       { "SHIFT + TAB / K", "select previous window" },
+       { "SPACE", "select connections window" },
+       { "LEFT / h", "select output ports window" },
+       { "RIGHT / j", "select input ports window" },
+       { "UP / k", "select previous item on list" },
+       { "DOWN / j", "select previous item on list" },
+       { "HOME", "select first item on list" },
+       { "END", "select last item on list" },
+       { "c / ENTER", "connect" },
+       { "d / BACKSPACE", "disconnect" },
+       { "SHIFT + d", "disconnect all" },
+       { "r", "refresh" },
+       { "q", "quit" },
+       { "SHIFT + h / ?", "help info (just what you see right now ;-)" },
+       { NULL, NULL }
+    };
+
+    wattron(w, COLOR_PAIR(6));
+    wprintw( w, "\n" );
+    wprintw ( w, "          _                                _\n");  
+    wprintw ( w, "   _ _   (_) __  ___  _ _   _ _   ___  __ | |_\n");
+    wprintw ( w, "  | ' \\  | |/ _|/ _ \\| ' \\ | ' \\ / -_)/ _||  _|\n");
+    wprintw ( w, "  |_||_|_/ |\\__|\\___/|_||_||_||_|\\___|\\__| \\__|\n");
+    wprintw ( w, "       |__/ version %s by Xj\n", VERSION);
+    wattroff(w, COLOR_PAIR(6));
+
+    struct help* hh;
+    for (hh = h; hh->keys; hh++) {
+       wprintw( w, "  %15s - %s\n", hh->keys, hh->action );
+    }
+
+    wattron(w, COLOR_PAIR(1));
+    box(w, 0, 0);
+    wattroff(w, COLOR_PAIR(1));
+
+    wrefresh(w);
+    wgetch(w);
+    delwin(w);
+}
 
 int main() {
   unsigned short i, ret, rows, cols, window_selection=0;
   struct window windows[3];
-  WINDOW* help_window;
+  WINDOW* status_window;
   const char* err_message = NULL;
   const char* PortsType = JACK_DEFAULT_MIDI_TYPE;
   jack_client_t* client;
@@ -414,9 +465,9 @@ int main() {
   init_pair(7, COLOR_BLUE, COLOR_BLACK);
 
   /* Create Help Window */
-  help_window = newwin(WHLP_H, WHLP_W, WHLP_Y, WHLP_X);
-  keypad(help_window, TRUE);
-  wtimeout(help_window, 3000);
+  status_window = newwin(WSTAT_H, WSTAT_W, WSTAT_Y, WSTAT_X);
+  keypad(status_window, TRUE);
+  wtimeout(status_window, 3000);
 
   /* Some Jack versions are very aggressive in breaking view */
   jack_set_info_function(suppress_jack_log);
@@ -451,13 +502,13 @@ loop:
   for (i=0; i < 3; i++) draw_list(windows+i);
 
   if (err_message) {
-    draw_help(help_window, 5, err_message, jack_cpu_load(client), rt);
+    draw_status(status_window, 5, err_message, jack_cpu_load(client), rt);
     err_message = NULL;
   } else {
-    draw_help(help_window, 6, HELP, jack_cpu_load(client), rt);
+    draw_status(status_window, 6, DEFAULT_STATUS, jack_cpu_load(client), rt);
   }
 
-  switch ( wgetch(help_window) ) {
+  switch ( wgetch(status_window) ) {
   case KEY_TAB:
   case 'J':
     window_selection = select_window(windows, window_selection, window_selection+1);
@@ -479,8 +530,8 @@ loop:
   case 'r':
   case KEY_RESIZE:
     getmaxyx(stdscr, rows, cols);
-    wresize(help_window, WHLP_H, WHLP_W);
-    mvwin(help_window, WHLP_Y, WHLP_X);
+    wresize(status_window, WSTAT_H, WSTAT_W);
+    mvwin(status_window, WSTAT_Y, WSTAT_X);
     resize_window(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_X);
     resize_window(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X);
     resize_window(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X);
@@ -528,6 +579,10 @@ loop:
   case ' ':
     window_selection = select_window(windows, window_selection, 2);
     goto loop;
+  case '?':
+  case 'H':
+    show_help();
+    goto refresh;
   }
   if (! want_refresh) goto loop;
 refresh:
