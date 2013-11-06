@@ -477,11 +477,15 @@ struct help {
 };
 
 void show_help() {
-    WINDOW* w = newwin(24, 80, 0, 0);
+    unsigned short rows, cols;
+    getmaxyx(stdscr, rows, cols);
+
+    WINDOW* w = newwin(rows , cols, 0, 0);
 
     struct help h[] = {
        { "a", "manage audio" },
        { "m", "manage MIDI" },
+       { "g", "Toggle grid view" },
        { "TAB / SHIFT + j", "select next window" },
        { "SHIFT + TAB / K", "select previous window" },
        { "SPACE", "select connections window" },
@@ -510,9 +514,8 @@ void show_help() {
     wattroff(w, COLOR_PAIR(6));
 
     struct help* hh;
-    for (hh = h; hh->keys; hh++) {
+    for (hh = h; hh->keys; hh++)
        wprintw( w, "  %15s - %s\n", hh->keys, hh->action );
-    }
 
     wattron(w, COLOR_PAIR(1));
     box(w, 0, 0);
@@ -728,13 +731,12 @@ refresh:
 	}
 	goto loop;
 quit:
-  free_all_ports(all_list);
-  cleanup(windows);
+	free_all_ports(all_list);
+	cleanup(windows); /* Clean windows lists */
 quit_no_clean:
-  jack_deactivate(client);
-  jack_client_close (client);
+	jack_deactivate(client);
+	jack_client_close (client);
 qxit:
-  endwin();
-
-  return ret;
+	endwin();
+	return ret;
 }
