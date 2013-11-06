@@ -100,11 +100,22 @@ struct graph {
 /* Function forgotten by Jack-Devs */
 JSList* jack_slist_nth(JSList* list_ptr, unsigned short n) {
    unsigned short i = 0;
-   JSList* node;
 
+   JSList* node;
    for(node=list_ptr; node ; node = jack_slist_next(node), i++ )
       if (i == n) return node;
+
    return NULL;
+}
+
+int jack_slist_find_pos(JSList* list_ptr, void *data) {
+   unsigned short i = 0;
+
+   JSList* node;
+   for(node=list_ptr; node ; node = jack_slist_next(node), i++ )
+      if (node->data == data) return i;
+
+   return -1;
 }
 
 void window_item_next(struct window* w) { if (w->index < w->count - 1) w->index++; }
@@ -167,27 +178,25 @@ get_port_by_name(JSList* list_ptr, const char* name) {
 
 JSList*
 build_connections(jack_client_t* client, JSList* list_ptr, const char* type) {
-   unsigned short i;
-   struct connection* c;
-   const char** connections;
    JSList* new = NULL;
-   JSList* node;
-   struct port *inp, *outp;
 
+   JSList* node;
    for ( node=list_ptr; node; node=jack_slist_next(node) ) {
        // For all Input ports
-       inp = node->data;
+       struct port *inp = node->data;
        if(! (inp->flags & JackPortIsInput)) continue;
        if( strcmp(inp->type, type) != 0 ) continue;
 
-       connections = jack_port_get_all_connections( client, jack_port_by_name(client, inp->name) );
+       const char** connections = jack_port_get_all_connections (
+           client, jack_port_by_name(client, inp->name) );
        if (!connections) continue;
 
+       unsigned short i;
        for (i=0; connections[i]; i++) {
-           outp = get_port_by_name(list_ptr, connections[i]);
+           struct port *outp = get_port_by_name(list_ptr, connections[i]);
            if(!outp) continue; // WTF can't find OutPort in our list ?
 
-       	   c = malloc(sizeof(struct connection));
+           struct connection* c = malloc(sizeof(struct connection));
            c->type = type;
            c->in = inp;
            c->out = outp;
@@ -216,42 +225,41 @@ void draw_border(struct window * window_ptr) {
 }
 
 void draw_list(struct window* window_ptr) {
-  unsigned short row, col, color, rows, cols;
-  short offset;
-  JSList* node;
-  struct port* p;
-  struct connection* c;
-  char fmt[40];
+	unsigned short rows, cols;
+	getmaxyx(window_ptr->window_ptr, rows, cols);
 
-  row = col = 1;
-  getmaxyx(window_ptr->window_ptr, rows, cols);
-  offset = window_ptr->index + 3 - rows; // first displayed index
-  if(offset < 0) offset = 0;
-  for ( node=jack_slist_nth(window_ptr->list_ptr,offset); node; node=jack_slist_next(node) ) {
-    color = (row == window_ptr->index - offset + 1) ? (window_ptr->selected) ? 3 : 2 : 1;
-    wattron(window_ptr->window_ptr, COLOR_PAIR(color));
+	short offset = window_ptr->index + 3 - rows; // first displayed index
+	if(offset < 0) offset = 0;
 
-    switch(window_ptr->type) {
-    case WIN_PORTS:
-       p = node->data;
-       snprintf(fmt, sizeof(fmt), "%%-%d.%ds", cols - 2, cols - 2);
-       mvwprintw(window_ptr->window_ptr, row, col, fmt, p->name);
-       break;
-    case WIN_CONNECTIONS:
-       c = node->data;
-       snprintf(fmt, sizeof(fmt), "%%%d.%ds -> %%-%d.%ds",
-                cols/2 - 3, cols/2 - 3, cols/2 - 3, cols/2 - 3);
-       mvwprintw(window_ptr->window_ptr, row, col, fmt, c->out->name, c->in->name);
-       break;
-    default:
-       ERR_OUT("Unknown WinType");
-    }
-    wattroff(window_ptr->window_ptr, COLOR_PAIR(color));
-    wclrtoeol(window_ptr->window_ptr);
-    row++;
-  }
-  draw_border(window_ptr);
-  wrefresh(window_ptr->window_ptr);
+	unsigned short row =1, col = 1;
+	JSList* node;
+	for ( node=jack_slist_nth(window_ptr->list_ptr,offset); node; node=jack_slist_next(node) ) {
+		char fmt[40];
+		unsigned short color = (row == window_ptr->index - offset + 1)
+			? (window_ptr->selected) ? 3 : 2 : 1;
+		wattron(window_ptr->window_ptr, COLOR_PAIR(color));
+
+		switch(window_ptr->type) {
+		case WIN_PORTS:;
+			struct port* p = node->data;
+			snprintf(fmt, sizeof(fmt), "%%-%d.%ds", cols - 2, cols - 2);
+			mvwprintw(window_ptr->window_ptr, row, col, fmt, p->name);
+			break;
+		case WIN_CONNECTIONS:;
+			struct connection* c = node->data;
+			snprintf(fmt, sizeof(fmt), "%%%d.%ds -> %%-%d.%ds",
+				cols/2 - 3, cols/2 - 3, cols/2 - 3, cols/2 - 3);
+			mvwprintw(window_ptr->window_ptr, row, col, fmt, c->out->name, c->in->name);
+			break;
+		default:
+			ERR_OUT("Unknown WinType");
+		}
+		wattroff(window_ptr->window_ptr, COLOR_PAIR(color));
+		wclrtoeol(window_ptr->window_ptr);
+		row++;
+	}
+	draw_border(window_ptr);
+	wrefresh(window_ptr->window_ptr);
 }
 
 void
@@ -378,6 +386,91 @@ void draw_status(WINDOW* w, int c, const char* msg, float dsp_load, bool rt) {
     wrefresh(w);
 }
 
+int get_max_port_name ( JSList* list ) {
+    int ret = 0;
+    JSList* node;
+    for ( node=list; node; node=jack_slist_next(node) ) {
+        struct port* p = node->data;
+        int len = strlen ( p->name );
+        if ( len > ret ) ret = len;
+    }
+    return ret;
+}
+
+enum Orientation { ORT_VERT, ORT_HORIZ };
+void grid_draw_port_list ( WINDOW* w, JSList* list, int start, enum Orientation ort ) {
+	unsigned short rows, cols;
+	getmaxyx(w, rows, cols);
+
+	int row, col;
+	if ( ort == ORT_VERT ) {
+		row = 1; col = start;
+		mvwvline(w, row, col, ACS_VLINE, rows);
+	} else { /* assume ORT_HORIZ */
+		row = start; col = 1;
+		mvwhline(w, row, col, ACS_HLINE, cols);
+	}
+
+	JSList* node;
+	for ( node=jack_slist_nth(list,0); node; node=jack_slist_next(node) ) {
+		struct port* p = node->data;
+
+		/* Draw port name */
+		wattron(w, COLOR_PAIR(1));
+		if ( ort == ORT_VERT ) {
+			int len = strlen ( p->name );
+			int i;
+			for ( ++col, i = 0; i < len; i++ )
+				mvwprintw(w, i+1, col, "%c", p->name[i]);
+		} else { /* assume ORT_HORIZ */
+			mvwprintw(w, ++row, col, "%s", p->name);
+		}
+		wattroff(w, COLOR_PAIR(1));
+
+		/* Draw line */
+		if ( ort == ORT_VERT ) {
+			mvwvline(w, row, ++col, ACS_VLINE, rows);
+		} else { /* assume ORT_HORIZ */
+			mvwhline(w, ++row, col, ACS_HLINE, cols);
+		}
+	}
+}
+
+void draw_grid ( WINDOW* w, JSList* list_out, JSList* list_in, JSList* list_con ) {
+	wclear ( w );
+
+	/* IN */
+	int start_col = get_max_port_name ( list_out ) + 1;
+	grid_draw_port_list ( w, list_in, start_col, ORT_VERT );
+
+	/* OUT */
+	int start_row = get_max_port_name ( list_in ) + 1;
+	grid_draw_port_list ( w, list_out, start_row, ORT_HORIZ );
+
+	/* Draw Connections */
+	JSList* node;
+	for ( node=jack_slist_nth(list_con,0); node; node=jack_slist_next(node) ) {
+		struct connection* c = node->data;
+        
+		int in_pos = jack_slist_find_pos ( list_in, c->in );
+		int col = start_col + 1 + in_pos * 2;
+
+		int out_pos = jack_slist_find_pos ( list_out, c->out );
+		int row = start_row + 1 + out_pos * 2;
+
+		wattron(w, COLOR_PAIR(2));
+		mvwprintw(w, row, col, "%c", 'X' );
+		wattroff(w, COLOR_PAIR(2));
+	}
+
+	/* Draw border */
+	wattron(w, COLOR_PAIR(1));
+	box(w, 0, 0);
+	wattroff(w, COLOR_PAIR(1));
+
+	wrefresh(w);
+}
+
 struct help {
 	const char* keys;
 	const char* action;
@@ -430,17 +523,17 @@ void show_help() {
     delwin(w);
 }
 
+enum ViewMode { VIEW_MODE_NORMAL, VIEW_MODE_GRID };
 int main() {
   unsigned short i, ret, rows, cols, window_selection=0;
   struct window windows[3];
   WINDOW* status_window;
+  WINDOW* grid_window = NULL;
   const char* err_message = NULL;
+  enum ViewMode ViewMode = VIEW_MODE_NORMAL;
   const char* PortsType = JACK_DEFAULT_MIDI_TYPE;
-  jack_client_t* client;
-  jack_status_t status;
   JSList *all_list = NULL;
   bool want_refresh = FALSE;
-  bool rt;
   struct graph g = { &want_refresh, &err_message };
 
   /* Initialize ncurses */
@@ -474,7 +567,8 @@ int main() {
   jack_set_error_function(suppress_jack_log);
 
   /* Initialize jack */
-  client = jack_client_open (APPNAME, JackNoStartServer, &status);
+  jack_status_t status;
+  jack_client_t* client = jack_client_open (APPNAME, JackNoStartServer, &status);
   if (! client) {
     if (status & JackServerFailed) ERR_OUT ("JACK server not running");
     else ERR_OUT ("jack_client_open() failed, status = 0x%2.0x", status);
@@ -482,7 +576,7 @@ int main() {
     goto quit_no_clean;
   }
 
-  rt = (bool) jack_is_realtime(client);
+  bool rt = jack_is_realtime(client);
   jack_set_graph_order_callback(client, graph_order_handler, &g);
   jack_activate(client);
 
@@ -499,109 +593,140 @@ int main() {
   windows[window_selection].selected = TRUE;
 
 loop:
-  for (i=0; i < 3; i++) draw_list(windows+i);
+	if ( ViewMode == VIEW_MODE_GRID ) {
+		draw_grid( grid_window, windows[0].list_ptr, windows[1].list_ptr, windows[2].list_ptr );
+	} else { /* Assume VIEW_MODE_NORMAL */
+		for (i=0; i < 3; i++) draw_list(windows+i);
+	}
 
-  if (err_message) {
-    draw_status(status_window, 5, err_message, jack_cpu_load(client), rt);
-    err_message = NULL;
-  } else {
-    draw_status(status_window, 6, DEFAULT_STATUS, jack_cpu_load(client), rt);
-  }
+	if (err_message) {
+		draw_status(status_window, 5, err_message, jack_cpu_load(client), rt);
+		err_message = NULL;
+	} else {
+		draw_status(status_window, 6, DEFAULT_STATUS, jack_cpu_load(client), rt);
+	}
 
-  switch ( wgetch(status_window) ) {
-  case KEY_TAB:
-  case 'J':
-    window_selection = select_window(windows, window_selection, window_selection+1);
-    goto loop;
-  case KEY_BTAB:
-  case 'K':
-    window_selection = select_window(windows, window_selection, window_selection-1);
-    goto loop;
-  case 'a':
-    windows[2].name = CON_NAME_A;
-    PortsType = JACK_DEFAULT_AUDIO_TYPE;
-    goto refresh;
-  case 'm':
-    windows[2].name = CON_NAME_M;
-    PortsType = JACK_DEFAULT_MIDI_TYPE;
-    goto refresh;
-  case KEY_EXIT:
-  case 'q': ret =0; goto quit;
-  case 'r':
-  case KEY_RESIZE:
-    getmaxyx(stdscr, rows, cols);
-    wresize(status_window, WSTAT_H, WSTAT_W);
-    mvwin(status_window, WSTAT_Y, WSTAT_X);
-    resize_window(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_X);
-    resize_window(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X);
-    resize_window(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X);
-    goto refresh;
-  case 'c':
-  case '\n':
-  case KEY_ENTER:
-    if ( w_connect(client, windows, windows+1) ) goto refresh;
-    err_message = ERR_CONNECT;
-    goto loop;
-  case 'd':
-  case KEY_BACKSPACE:
-    if (w_disconnect(client, windows+2) ) goto refresh;
-    err_message = ERR_DISCONNECT;
-    goto loop;
-  case 'D':
-    while (w_disconnect(client, windows+2) ) {
-      windows[2].list_ptr = jack_slist_remove(windows[2].list_ptr,
-          jack_slist_nth(windows[2].list_ptr, windows[2].index)->data);
-      windows[2].count--;
-    }
-    goto refresh;
-  case KEY_DOWN:
-  case 'j':
-    window_item_next(windows+window_selection);
-    goto loop;
-  case KEY_UP:
-  case 'k':
-    window_item_previous(windows+window_selection);
-    goto loop;
-  case KEY_HOME:
-    (windows+window_selection)->index = 0;
-    goto loop;
-  case KEY_END:
-    (windows+window_selection)->index = (windows+window_selection)->count - 1;
-    goto loop;
-  case KEY_LEFT:
-  case 'h':
-    window_selection = select_window(windows, window_selection, 0);
-    goto loop;
-  case KEY_RIGHT:
-  case 'l':
-    window_selection = select_window(windows, window_selection, 1);
-    goto loop;
-  case ' ':
-    window_selection = select_window(windows, window_selection, 2);
-    goto loop;
-  case '?':
-  case 'H':
-    show_help();
-    goto refresh;
-  }
-  if (! want_refresh) goto loop;
+	int c = wgetch(status_window);
+
+	/* Common keys */
+	switch ( c ) {
+	case 'g': /* Toggle grid */
+		if ( ViewMode == VIEW_MODE_GRID ) {
+			ViewMode = VIEW_MODE_NORMAL;
+			delwin(grid_window);
+			grid_window = NULL;
+		} else { /* Assume VIEW_MODE_NORMAL */
+			ViewMode = VIEW_MODE_GRID;
+			unsigned short rows, cols;
+			getmaxyx(stdscr, rows, cols);
+			grid_window = newwin(rows - 1, cols, 0, 0);
+		}
+		goto refresh;
+	case 'a': /* Show Audio Ports */
+		windows[2].name = CON_NAME_A;
+		PortsType = JACK_DEFAULT_AUDIO_TYPE;
+		goto refresh;
+	case 'm': /* Show MIDI Ports */
+		windows[2].name = CON_NAME_M;
+		PortsType = JACK_DEFAULT_MIDI_TYPE;
+		goto refresh;
+	case 'q': /* Quit from app */
+	case KEY_EXIT: 
+		ret =0;
+		goto quit;
+	
+	case 'r': /* Force refresh or terminal resize */
+	case KEY_RESIZE:
+		getmaxyx(stdscr, rows, cols);
+		wresize(status_window, WSTAT_H, WSTAT_W);
+		mvwin(status_window, WSTAT_Y, WSTAT_X);
+		resize_window(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_X);
+		resize_window(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X);
+		resize_window(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X);
+
+		if ( ViewMode == VIEW_MODE_GRID )
+			wresize(grid_window, rows - 1, cols);
+		goto refresh;
+	case '?': /* Help */
+	case 'H':
+		show_help();
+		goto refresh;
+	}
+
+	/* Normal mode keys */
+	switch ( c ) {
+	case 'J': /* Select Next window */
+	case KEY_TAB:
+		window_selection = select_window(windows, window_selection, window_selection+1);
+		goto loop;
+	case 'K': /* Select Previous window */
+	case KEY_BTAB:
+		window_selection = select_window(windows, window_selection, window_selection-1);
+		goto loop;
+	case 'c': /* Connect */
+	case '\n':
+	case KEY_ENTER:
+		if ( w_connect(client, windows, windows+1) ) goto refresh;
+			err_message = ERR_CONNECT;
+		goto loop;
+	case 'd': /* Disconnect */
+	case KEY_BACKSPACE:
+		if (w_disconnect(client, windows+2) ) goto refresh;
+			err_message = ERR_DISCONNECT;
+		goto loop;
+	case 'D': /* Disconnect all */
+		while (w_disconnect(client, windows+2) ) {
+			windows[2].list_ptr = jack_slist_remove(windows[2].list_ptr,
+			jack_slist_nth(windows[2].list_ptr, windows[2].index)->data);
+			windows[2].count--;
+		}
+		goto refresh;
+	case 'j': /* Select next item on list */
+	case KEY_DOWN:
+		window_item_next(windows+window_selection);
+		goto loop;
+	case KEY_UP: /* Select previous item on list */
+	case 'k':
+		window_item_previous(windows+window_selection);
+		goto loop;
+	case KEY_HOME: /* Select first item on list */
+		(windows+window_selection)->index = 0;
+		goto loop;
+	case KEY_END: /* Select last item on list */
+		(windows+window_selection)->index = (windows+window_selection)->count - 1;
+		goto loop;
+	case 'h': /* Select left window */
+	case KEY_LEFT:
+		window_selection = select_window(windows, window_selection, 0);
+		goto loop;
+	case 'l': /* Select right window */
+	case KEY_RIGHT:
+		window_selection = select_window(windows, window_selection, 1);
+		goto loop;
+	case ' ': /* Select bottom window */
+		window_selection = select_window(windows, window_selection, 2);
+		goto loop;
+  	}
+
+	if (! want_refresh) goto loop;
 refresh:
-  want_refresh = FALSE;
-  free_all_ports(all_list);
-  cleanup(windows);
+	want_refresh = FALSE;
+	free_all_ports(all_list);
+	cleanup(windows); /* Clean windows lists */
 
-  all_list = build_ports(client);
-  windows[0].list_ptr = select_ports(all_list, JackPortIsOutput, PortsType);
-  windows[1].list_ptr = select_ports(all_list, JackPortIsInput, PortsType);
-  windows[2].list_ptr = build_connections(client, all_list, PortsType);
+	all_list = build_ports(client);
+	windows[0].list_ptr = select_ports(all_list, JackPortIsOutput, PortsType);
+	windows[1].list_ptr = select_ports(all_list, JackPortIsInput, PortsType);
+	windows[2].list_ptr = build_connections(client, all_list, PortsType);
 
-  for(i=0; i < 3; i++) {
-     windows[i].count = jack_slist_length( windows[i].list_ptr );
-     if (windows[i].index > windows[i].count - 1) windows[i].index = 0;
-     wclear(windows[i].window_ptr);
-  }
-
-  goto loop;
+	if ( ViewMode == VIEW_MODE_NORMAL ) {
+		for(i=0; i < 3; i++) {
+			windows[i].count = jack_slist_length( windows[i].list_ptr );
+			if (windows[i].index > windows[i].count - 1) windows[i].index = 0;
+			wclear(windows[i].window_ptr);
+		}
+	}
+	goto loop;
 quit:
   free_all_ports(all_list);
   cleanup(windows);
