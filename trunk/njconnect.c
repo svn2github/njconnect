@@ -30,7 +30,7 @@
 #include <stdbool.h>
 
 #define APPNAME "njconnect"
-#define VERSION "1.3"
+#define VERSION "1.4"
 #define CON_NAME_A "Audio Connections"
 #define CON_NAME_M "MIDI Connections"
 
