@@ -422,10 +422,7 @@ void grid_draw_port_list ( WINDOW* w, JSList* list, int start, enum Orientation 
 		/* Draw port name */
 		wattron(w, COLOR_PAIR(1));
 		if ( ort == ORT_VERT ) {
-			int len = strlen ( p->name );
-			int i;
-			for ( ++col, i = 0; i < len; i++ )
-				mvwprintw(w, i+1, col, "%c", p->name[i]);
+			mvwprintw(w, row++, ++col, "%s", p->name);
 		} else { /* assume ORT_HORIZ */
 			mvwprintw(w, ++row, col, "%s", p->name);
 		}
@@ -448,7 +445,7 @@ void draw_grid ( WINDOW* w, JSList* list_out, JSList* list_in, JSList* list_con 
 	grid_draw_port_list ( w, list_in, start_col, ORT_VERT );
 
 	/* OUT */
-	int start_row = get_max_port_name ( list_in ) + 1;
+	int start_row = jack_slist_length( list_in ) + 1;
 	grid_draw_port_list ( w, list_out, start_row, ORT_HORIZ );
 
 	/* Draw Connections */
