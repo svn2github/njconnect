@@ -368,6 +368,10 @@ int graph_order_handler(void *arg) {
     return 0;
 }
 
+int process_handler ( jack_nframes_t nframes, void *arg ) {
+    return 0;
+}
+
 void draw_status(WINDOW* w, int c, const char* msg, float dsp_load, bool rt) {
     unsigned short cols;
     cols = getmaxx(w);
@@ -581,6 +585,10 @@ int main() {
 
   bool rt = jack_is_realtime(client);
   jack_set_graph_order_callback(client, graph_order_handler, &g);
+
+  /* NOTE: need minimal process callback for Jack1 to call graph order handler */
+  jack_set_process_callback ( client, process_handler, NULL );
+
   jack_activate(client);
 
   /* Build ports, connections list */
