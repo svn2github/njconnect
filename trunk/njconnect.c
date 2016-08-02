@@ -553,13 +553,14 @@ int main() {
   }
 
   start_color();
-  init_pair(1, COLOR_CYAN, COLOR_BLACK);
+  use_default_colors();
+  init_pair(1, COLOR_CYAN, -1);
   init_pair(2, COLOR_BLACK, COLOR_WHITE);
   init_pair(3, COLOR_BLACK, COLOR_GREEN);
-  init_pair(4, COLOR_WHITE, COLOR_BLACK);
+  init_pair(4, COLOR_WHITE, -1);
   init_pair(5, COLOR_BLACK, COLOR_RED);
-  init_pair(6, COLOR_YELLOW, COLOR_BLACK);
-  init_pair(7, COLOR_BLUE, COLOR_BLACK);
+  init_pair(6, COLOR_YELLOW, -1);
+  init_pair(7, COLOR_BLUE, -1);
 
   /* Create Help Window */
   status_window = newwin(WSTAT_H, WSTAT_W, WSTAT_Y, WSTAT_X);
