@@ -37,6 +37,8 @@
 #define ERR_CONNECT "Connection failed"
 #define ERR_DISCONNECT "Disconnection failed"
 #define GRAPH_CHANGED "Graph changed"
+#define SAMPLE_RATE_CHANGED "Sample rate changed"
+#define BUFFER_SIZE_CHANGED "Buffer size changed"
 #define DEFAULT_STATUS "->> Press SHIFT+H or ? for help << -"
 #define KEY_TAB '\t'
 
@@ -92,9 +94,13 @@ struct connection {
    struct port* out;
 };
 
-struct graph {
-   bool* want_refresh;
-   const char** err_message;
+struct NJ {
+   jack_client_t* client;
+   jack_nframes_t sample_rate;
+   jack_nframes_t buffer_size;
+   bool rt;
+   bool want_refresh;
+   const char* err_msg;
 };
 
 /* Function forgotten by Jack-Devs */
@@ -362,9 +368,25 @@ select_window(struct window* windows, int current, int new) {
 }
 
 int graph_order_handler(void *arg) {
-    struct graph *graph = arg;
-    *(graph->want_refresh) = TRUE;
-    *(graph->err_message) = GRAPH_CHANGED;
+    struct NJ* nj = arg;
+    nj->err_msg = GRAPH_CHANGED;
+    nj->want_refresh = TRUE;
+    return 0;
+}
+
+int buffer_size_handler( jack_nframes_t buffer_size, void *arg ) {
+    struct NJ* nj = arg;
+    nj->buffer_size = buffer_size;
+    nj->err_msg = BUFFER_SIZE_CHANGED;
+    nj->want_refresh = TRUE;
+    return 0;
+}
+
+int sample_rate_handler( jack_nframes_t sample_rate, void *arg ) {
+    struct NJ* nj = arg;
+    nj->sample_rate = sample_rate;
+    nj->err_msg = SAMPLE_RATE_CHANGED;
+    nj->want_refresh = TRUE;
     return 0;
 }
 
@@ -372,19 +394,36 @@ int process_handler ( jack_nframes_t nframes, void *arg ) {
     return 0;
 }
 
-void draw_status(WINDOW* w, int c, const char* msg, float dsp_load, bool rt) {
-    unsigned short cols;
-    cols = getmaxx(w);
-
+void draw_status( WINDOW* w, struct NJ* nj ) {
     wmove(w, 0, 0);
     wclrtoeol(w);
 
-    wattron(w, COLOR_PAIR(c));
-    mvwprintw(w, 0, 1, msg);
-    wattroff(w, COLOR_PAIR(c));
+    // Message
+    int color;
+    const char* msg;
+    if ( nj->err_msg != NULL ) {
+       msg = nj->err_msg;
+       nj->err_msg = NULL;
+       color = 6;
+    } else {
+       msg = DEFAULT_STATUS;
+       color = 5;
+    }
 
+    // Jack stuff
+    wattron(w, COLOR_PAIR(color));
+    mvwprintw(w, 0, 1, msg);
+    wattroff(w, COLOR_PAIR(color));
+
+    unsigned short cols = getmaxx(w);
     wattron(w, COLOR_PAIR(7));
-    mvwprintw(w, 0, cols-12, "DSP:%4.2f%s", dsp_load, rt ? "@RT" : "!RT" );
+    mvwprintw(w, 0, cols-23,
+       "%d/%d DSP:%4.2f%s",
+       nj->sample_rate,
+       nj->buffer_size,
+       jack_cpu_load( nj->client ),
+       nj->rt ? "@RT" : "!RT"
+    );
     wattroff(w, COLOR_PAIR(7));
 
     wrefresh(w);
@@ -533,12 +572,10 @@ int main() {
   struct window windows[3];
   WINDOW* status_window;
   WINDOW* grid_window = NULL;
-  const char* err_message = NULL;
   enum ViewMode ViewMode = VIEW_MODE_NORMAL;
   const char* PortsType = JACK_DEFAULT_MIDI_TYPE;
   JSList *all_list = NULL;
-  bool want_refresh = FALSE;
-  struct graph g = { &want_refresh, &err_message };
+  struct NJ nj;
 
   /* Initialize ncurses */
   initscr();
@@ -562,10 +599,10 @@ int main() {
   init_pair(6, COLOR_YELLOW, -1);
   init_pair(7, COLOR_BLUE, -1);
 
-  /* Create Help Window */
+  /* Create Help/Status Window */
   status_window = newwin(WSTAT_H, WSTAT_W, WSTAT_Y, WSTAT_X);
   keypad(status_window, TRUE);
-  wtimeout(status_window, 3000);
+  wtimeout(status_window, 1000);
 
   /* Some Jack versions are very aggressive in breaking view */
   jack_set_info_function(suppress_jack_log);
@@ -573,27 +610,33 @@ int main() {
 
   /* Initialize jack */
   jack_status_t status;
-  jack_client_t* client = jack_client_open (APPNAME, JackNoStartServer, &status);
-  if (! client) {
+  nj.client = jack_client_open (APPNAME, JackNoStartServer, &status);
+  if (! nj.client) {
     if (status & JackServerFailed) ERR_OUT ("JACK server not running");
     else ERR_OUT ("jack_client_open() failed, status = 0x%2.0x", status);
     ret = 2;
     goto quit_no_clean;
   }
+  nj.sample_rate = jack_get_sample_rate( nj.client );
+  nj.buffer_size = jack_get_buffer_size( nj.client );
+  nj.rt = jack_is_realtime( nj.client );
+  nj.err_msg = NULL;
+  nj.want_refresh = FALSE;
 
-  bool rt = jack_is_realtime(client);
-  jack_set_graph_order_callback(client, graph_order_handler, &g);
+  jack_set_graph_order_callback( nj.client, graph_order_handler, &nj );
+  jack_set_buffer_size_callback( nj.client, buffer_size_handler, &nj );
+  jack_set_sample_rate_callback( nj.client, sample_rate_handler, &nj );
 
   /* NOTE: need minimal process callback for Jack1 to call graph order handler */
-  jack_set_process_callback ( client, process_handler, NULL );
+  jack_set_process_callback ( nj.client, process_handler, NULL );
 
-  jack_activate(client);
+  jack_activate( nj.client );
 
   /* Build ports, connections list */
-  all_list = build_ports(client);
+  all_list = build_ports( nj.client );
   windows[0].list_ptr = select_ports(all_list, JackPortIsOutput, PortsType);
   windows[1].list_ptr = select_ports(all_list, JackPortIsInput, PortsType);
-  windows[2].list_ptr = build_connections(client, all_list, PortsType);
+  windows[2].list_ptr = build_connections( nj.client, all_list, PortsType );
 
   /* Create windows */
   create_window(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_Y, "Output Ports", WIN_PORTS);
@@ -608,12 +651,7 @@ loop:
 		for (i=0; i < 3; i++) draw_list(windows+i);
 	}
 
-	if (err_message) {
-		draw_status(status_window, 5, err_message, jack_cpu_load(client), rt);
-		err_message = NULL;
-	} else {
-		draw_status(status_window, 6, DEFAULT_STATUS, jack_cpu_load(client), rt);
-	}
+	draw_status(status_window, &nj );
 
 	int c = wgetch(status_window);
 
@@ -675,16 +713,16 @@ loop:
 	case 'c': /* Connect */
 	case '\n':
 	case KEY_ENTER:
-		if ( w_connect(client, windows, windows+1) ) goto refresh;
-			err_message = ERR_CONNECT;
+		if ( w_connect( nj.client, windows, windows+1) ) goto refresh;
+			nj.err_msg = ERR_CONNECT;
 		goto loop;
 	case 'd': /* Disconnect */
 	case KEY_BACKSPACE:
-		if (w_disconnect(client, windows+2) ) goto refresh;
-			err_message = ERR_DISCONNECT;
+		if (w_disconnect( nj.client, windows+2) ) goto refresh;
+			nj.err_msg = ERR_DISCONNECT;
 		goto loop;
 	case 'D': /* Disconnect all */
-		while (w_disconnect(client, windows+2) ) {
+		while (w_disconnect( nj.client, windows+2) ) {
 			windows[2].list_ptr = jack_slist_remove(windows[2].list_ptr,
 			jack_slist_nth(windows[2].list_ptr, windows[2].index)->data);
 			windows[2].count--;
@@ -717,16 +755,16 @@ loop:
 		goto loop;
   	}
 
-	if (! want_refresh) goto loop;
+	if (! nj.want_refresh) goto loop;
 refresh:
-	want_refresh = FALSE;
+	nj.want_refresh = FALSE;
 	free_all_ports(all_list);
 	cleanup(windows); /* Clean windows lists */
 
-	all_list = build_ports(client);
+	all_list = build_ports( nj.client );
 	windows[0].list_ptr = select_ports(all_list, JackPortIsOutput, PortsType);
 	windows[1].list_ptr = select_ports(all_list, JackPortIsInput, PortsType);
-	windows[2].list_ptr = build_connections(client, all_list, PortsType);
+	windows[2].list_ptr = build_connections( nj.client, all_list, PortsType);
 
 	if ( ViewMode == VIEW_MODE_NORMAL ) {
 		for(i=0; i < 3; i++) {
@@ -740,8 +778,8 @@ quit:
 	free_all_ports(all_list);
 	cleanup(windows); /* Clean windows lists */
 quit_no_clean:
-	jack_deactivate(client);
-	jack_client_close (client);
+	jack_deactivate( nj.client );
+	jack_client_close( nj.client );
 qxit:
 	endwin();
 	return ret;
