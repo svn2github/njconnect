@@ -31,15 +31,7 @@
 
 #define APPNAME "njconnect"
 #define VERSION "1.5"
-#define CON_NAME_A "Audio Connections"
-#define CON_NAME_M "MIDI Connections"
 
-#define ERR_CONNECT "Connection failed"
-#define ERR_DISCONNECT "Disconnection failed"
-#define GRAPH_CHANGED "Graph changed"
-#define SAMPLE_RATE_CHANGED "Sample rate changed"
-#define BUFFER_SIZE_CHANGED "Buffer size changed"
-#define DEFAULT_STATUS "->> Press SHIFT+H or ? for help << -"
 #define KEY_TAB '\t'
 
 #define WOUT_X 0
@@ -64,6 +56,16 @@
 
 #define MSG_OUT(format, arg...) printf(format "\n", ## arg)
 #define ERR_OUT(format, arg...) ( endwin(), fprintf(stderr, format "\n", ## arg), refresh() )
+
+// Common Strings
+const char* CON_NAME_A          = "Audio Connections";
+const char* CON_NAME_M          = "MIDI Connections";
+const char* ERR_CONNECT         = "Connection failed";
+const char* ERR_DISCONNECT      = "Disconnection failed";
+const char* GRAPH_CHANGED       = "Graph changed";
+const char* SAMPLE_RATE_CHANGED = "Sample rate changed";
+const char* BUFFER_SIZE_CHANGED = "Buffer size changed";
+const char* DEFAULT_STATUS      = "->> Press SHIFT+H or ? for help << -";
 
 enum WinType {
    WIN_PORTS,
@@ -132,19 +134,17 @@ void suppress_jack_log(const char* msg) {
 }
 
 JSList* build_ports(jack_client_t* client) {
-   JSList* new = NULL;
-   jack_port_t* jp;
    unsigned short i, count=0;
-   struct port* p;
 
    const char** jports = jack_get_ports (client, NULL, NULL, 0);
    if(! jports) return NULL;
 
    while(jports[count]) count++;
-   p = calloc(count, sizeof(struct port));
+   struct port* p = calloc(count, sizeof(struct port));
 
+   JSList* new = NULL;
    for (i=0; jports[i]; ++i, p++) {
-       jp = jack_port_by_name( client, jports[i] );
+       jack_port_t* jp = jack_port_by_name( client, jports[i] );
 
        strncpy(p->name, jports[i], sizeof(p->name));
        strncpy(p->type, jack_port_type( jp ), sizeof(p->type));
@@ -160,9 +160,8 @@ JSList*
 select_ports(JSList* list_ptr, int flags, const char* type) {
    JSList* new = NULL;
    JSList* node;
-   struct port* p;
    for ( node=list_ptr; node; node=jack_slist_next(node) ) {
-       p = node->data;
+       struct port* p = node->data;
        if ( (p->flags & flags) && strcmp(p->type, type) == 0 )
           new = jack_slist_append(new, p);
    }
@@ -172,11 +171,10 @@ select_ports(JSList* list_ptr, int flags, const char* type) {
 
 struct port*
 get_port_by_name(JSList* list_ptr, const char* name) {
-   struct port* p;
    JSList* node;
 
    for ( node=list_ptr; node; node=jack_slist_next(node) ) {
-       p = node->data;
+       struct port* p = node->data;
        if (strcmp(p->name, name) == 0) return p;
    }
    return NULL;
@@ -215,7 +213,7 @@ build_connections(jack_client_t* client, JSList* list_ptr, const char* type) {
 }
 
 void draw_border(struct window * window_ptr) {
-  int col = (window_ptr->width - strlen(window_ptr->name) - 4)/2;
+  int col = (window_ptr->width - strlen(window_ptr->name) - 4) / 2;
   if (col < 0) col = 0;
 
   /* 0, 0 gives default characters for the vertical and horizontal lines */
@@ -296,6 +294,7 @@ const char*
 get_selected_port_name(struct window* window_ptr) {
    JSList* list = jack_slist_nth(window_ptr->list_ptr, window_ptr->index);
    if (!list) return NULL;
+
    struct port* p = list->data;
    return p->name;
 }
@@ -304,6 +303,7 @@ bool
 w_connect(jack_client_t* client, struct window* window_src_ptr, struct window* window_dst_ptr) {
    const char* src = get_selected_port_name(window_src_ptr);
    if(!src) return FALSE;
+
    const char* dst = get_selected_port_name(window_dst_ptr);
    if(!dst) return FALSE;
 
@@ -336,11 +336,11 @@ void free_all_ports(JSList* all_ports) {
 void cleanup(struct window* windows) {
   short i;
   struct window* w = windows;
-  JSList *l, *node;
 
   for(i = 0; i < 3; i++, w++) {
-     l = w->list_ptr;
-     if( w->type == WIN_CONNECTIONS ) {
+     JSList* l = w->list_ptr;
+     if ( w->type == WIN_CONNECTIONS ) {
+       JSList* node;
        for ( node=w->list_ptr; node; node=jack_slist_next(node) )
           free(node->data);
      }
@@ -511,6 +511,37 @@ void draw_grid ( WINDOW* w, JSList* list_out, JSList* list_in, JSList* list_con 
 	wrefresh(w);
 }
 
+bool init_jack( struct NJ* nj ) {
+   /* Some Jack versions are very aggressive in breaking view */
+   jack_set_info_function(suppress_jack_log);
+   jack_set_error_function(suppress_jack_log);
+
+   /* Initialize jack */
+   jack_status_t status;
+   nj->client = jack_client_open (APPNAME, JackNoStartServer, &status);
+   if (! nj->client) {
+      if (status & JackServerFailed) ERR_OUT ("JACK server not running");
+      else ERR_OUT ("jack_client_open() failed, status = 0x%2.0x", status);
+      return false;
+   }
+   nj->sample_rate = jack_get_sample_rate( nj->client );
+   nj->buffer_size = jack_get_buffer_size( nj->client );
+   nj->rt = jack_is_realtime( nj->client );
+   nj->err_msg = NULL;
+   nj->want_refresh = FALSE;
+
+   jack_set_graph_order_callback( nj->client, graph_order_handler, nj );
+   jack_set_buffer_size_callback( nj->client, buffer_size_handler, nj );
+   jack_set_sample_rate_callback( nj->client, sample_rate_handler, nj );
+
+   /* NOTE: need minimal process callback for Jack1 to call graph order handler */
+   jack_set_process_callback ( nj->client, process_handler, NULL );
+
+   jack_activate( nj->client );
+
+   return true;
+}
+
 struct help {
 	const char* keys;
 	const char* action;
@@ -545,12 +576,13 @@ void show_help() {
     };
 
     wattron(w, COLOR_PAIR(6));
-    wprintw( w, "\n" );
-    wprintw ( w, "          _                                _\n");  
-    wprintw ( w, "   _ _   (_) __  ___  _ _   _ _   ___  __ | |_\n");
-    wprintw ( w, "  | ' \\  | |/ _|/ _ \\| ' \\ | ' \\ / -_)/ _||  _|\n");
-    wprintw ( w, "  |_||_|_/ |\\__|\\___/|_||_||_||_|\\___|\\__| \\__|\n");
-    wprintw ( w, "       |__/ version %s by Xj\n", VERSION);
+    wprintw( w, "\n"
+                "          _                                _\n"
+                "   _ _   (_) __  ___  _ _   _ _   ___  __ | |_\n"
+                "  | ' \\  | |/ _|/ _ \\| ' \\ | ' \\ / -_)/ _||  _|\n"
+                "  |_||_|_/ |\\__|\\___/|_||_||_||_|\\___|\\__| \\__|\n"
+                "       |__/ version %s by Xj\n", VERSION
+    );
     wattroff(w, COLOR_PAIR(6));
 
     struct help* hh;
@@ -599,38 +631,15 @@ int main() {
   init_pair(6, COLOR_YELLOW, -1);
   init_pair(7, COLOR_BLUE, -1);
 
+  if ( ! init_jack(&nj) ) {
+     ret = 2;
+     goto qxit;
+  }
+
   /* Create Help/Status Window */
   status_window = newwin(WSTAT_H, WSTAT_W, WSTAT_Y, WSTAT_X);
   keypad(status_window, TRUE);
   wtimeout(status_window, 1000);
-
-  /* Some Jack versions are very aggressive in breaking view */
-  jack_set_info_function(suppress_jack_log);
-  jack_set_error_function(suppress_jack_log);
-
-  /* Initialize jack */
-  jack_status_t status;
-  nj.client = jack_client_open (APPNAME, JackNoStartServer, &status);
-  if (! nj.client) {
-    if (status & JackServerFailed) ERR_OUT ("JACK server not running");
-    else ERR_OUT ("jack_client_open() failed, status = 0x%2.0x", status);
-    ret = 2;
-    goto quit_no_clean;
-  }
-  nj.sample_rate = jack_get_sample_rate( nj.client );
-  nj.buffer_size = jack_get_buffer_size( nj.client );
-  nj.rt = jack_is_realtime( nj.client );
-  nj.err_msg = NULL;
-  nj.want_refresh = FALSE;
-
-  jack_set_graph_order_callback( nj.client, graph_order_handler, &nj );
-  jack_set_buffer_size_callback( nj.client, buffer_size_handler, &nj );
-  jack_set_sample_rate_callback( nj.client, sample_rate_handler, &nj );
-
-  /* NOTE: need minimal process callback for Jack1 to call graph order handler */
-  jack_set_process_callback ( nj.client, process_handler, NULL );
-
-  jack_activate( nj.client );
 
   /* Build ports, connections list */
   all_list = build_ports( nj.client );
@@ -777,7 +786,6 @@ refresh:
 quit:
 	free_all_ports(all_list);
 	cleanup(windows); /* Clean windows lists */
-quit_no_clean:
 	jack_deactivate( nj.client );
 	jack_client_close( nj.client );
 qxit:
