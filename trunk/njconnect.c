@@ -272,20 +272,25 @@ void w_draw_list(Window* W) {
 
 void
 w_create(Window* W, int height, int width, int starty, int startx, const char* name, enum WinType type) {
-//  w->list = list;
   W->window_ptr = newwin(height, width, starty, startx);
   W->selected = FALSE;
   W->width = width;
   W->height = height;
   W->name = name;
   W->index = 0;
-  W->count = jack_slist_length(W->list);
   W->type = type;
 //  scrollok(w->window_ptr, TRUE);
 }
 
 void
-resize_window(Window* W, int height, int width, int starty, int startx) {
+w_assign_list(Window* W, JSList* list) {
+  W->list = list;
+  W->count = jack_slist_length(W->list);
+  if (W->index > W->count - 1) W->index = 0;
+}
+
+void
+w_resize(Window* W, int height, int width, int starty, int startx) {
 //  delwin(W->window_ptr);
 //  W->window_ptr = newwin(height, width, starty, startx);
   wresize(W->window_ptr, height, width);
@@ -642,9 +647,9 @@ int main() {
 
   /* Build ports, connections list */
   all_list = build_ports( nj.client );
-  windows[0].list = select_ports(all_list, JackPortIsOutput, PortsType);
-  windows[1].list = select_ports(all_list, JackPortIsInput, PortsType);
-  windows[2].list = build_connections( nj.client, all_list, PortsType );
+  w_assign_list( windows, select_ports(all_list, JackPortIsOutput, PortsType) );
+  w_assign_list( windows+1, select_ports(all_list, JackPortIsInput, PortsType) );
+  w_assign_list( windows+2, build_connections( nj.client, all_list, PortsType ) );
 
   /* Create windows */
   w_create(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_Y, "Output Ports", WIN_PORTS);
@@ -695,9 +700,9 @@ loop:
 		getmaxyx(stdscr, rows, cols);
 		wresize(status_window, WSTAT_H, WSTAT_W);
 		mvwin(status_window, WSTAT_Y, WSTAT_X);
-		resize_window(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_X);
-		resize_window(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X);
-		resize_window(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X);
+		w_resize(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_X);
+		w_resize(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X);
+		w_resize(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X);
 
 		if ( ViewMode == VIEW_MODE_GRID )
 			wresize(grid_window, rows - 1, cols);
@@ -770,14 +775,12 @@ refresh:
 	w_cleanup(windows); /* Clean windows lists */
 
 	all_list = build_ports( nj.client );
-	windows[0].list = select_ports(all_list, JackPortIsOutput, PortsType);
-	windows[1].list = select_ports(all_list, JackPortIsInput, PortsType);
-	windows[2].list = build_connections( nj.client, all_list, PortsType);
+  	w_assign_list( windows, select_ports(all_list, JackPortIsOutput, PortsType) );
+	w_assign_list( windows+1, select_ports(all_list, JackPortIsInput, PortsType) );
+	w_assign_list( windows+2, build_connections( nj.client, all_list, PortsType ) );
 
 	if ( ViewMode == VIEW_MODE_NORMAL ) {
 		for(i=0; i < 3; i++) {
-			windows[i].count = jack_slist_length( windows[i].list );
-			if (windows[i].index > windows[i].count - 1) windows[i].index = 0;
 			wclear(windows[i].window_ptr);
 		}
 	}
