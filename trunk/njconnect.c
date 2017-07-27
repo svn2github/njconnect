@@ -30,7 +30,7 @@
 #include <stdbool.h>
 
 #define APPNAME "njconnect"
-#define VERSION "1.5"
+#define VERSION "1.6"
 
 #define KEY_TAB '\t'
 
