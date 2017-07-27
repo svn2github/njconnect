@@ -645,17 +645,18 @@ int main() {
   keypad(status_window, TRUE);
   wtimeout(status_window, 1000);
 
-  /* Build ports, connections list */
-  all_list = build_ports( nj.client );
-  w_assign_list( windows, select_ports(all_list, JackPortIsOutput, PortsType) );
-  w_assign_list( windows+1, select_ports(all_list, JackPortIsInput, PortsType) );
-  w_assign_list( windows+2, build_connections( nj.client, all_list, PortsType ) );
-
   /* Create windows */
   w_create(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_Y, "Output Ports", WIN_PORTS);
   w_create(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X, "Input Ports", WIN_PORTS);
   w_create(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X, CON_NAME_M, WIN_CONNECTIONS);
   windows[window_selection].selected = TRUE;
+
+lists:
+  /* Build ports, connections list */
+  all_list = build_ports( nj.client );
+  w_assign_list( windows, select_ports(all_list, JackPortIsOutput, PortsType) );
+  w_assign_list( windows+1, select_ports(all_list, JackPortIsInput, PortsType) );
+  w_assign_list( windows+2, build_connections( nj.client, all_list, PortsType ) );
 
 loop:
 	if ( ViewMode == VIEW_MODE_GRID ) {
@@ -668,7 +669,7 @@ loop:
 
 	int c = wgetch(status_window);
 
-	/* Common keys */
+	/************* Common keys ***********************/
 	switch ( c ) {
 	case 'g': /* Toggle grid */
 		if ( ViewMode == VIEW_MODE_GRID ) {
@@ -711,10 +712,8 @@ loop:
 	case 'H':
 		show_help();
 		goto refresh;
-	}
 
-	/* Normal mode keys */
-	switch ( c ) {
+	/************* Normal mode keys *******************/
 	case 'J': /* Select Next window */
 	case KEY_TAB:
 		window_selection = select_window(windows, window_selection, window_selection+1);
@@ -774,17 +773,12 @@ refresh:
 	free_all_ports(all_list);
 	w_cleanup(windows); /* Clean windows lists */
 
-	all_list = build_ports( nj.client );
-  	w_assign_list( windows, select_ports(all_list, JackPortIsOutput, PortsType) );
-	w_assign_list( windows+1, select_ports(all_list, JackPortIsInput, PortsType) );
-	w_assign_list( windows+2, build_connections( nj.client, all_list, PortsType ) );
-
 	if ( ViewMode == VIEW_MODE_NORMAL ) {
 		for(i=0; i < 3; i++) {
 			wclear(windows[i].window_ptr);
 		}
 	}
-	goto loop;
+	goto lists;
 quit:
 	free_all_ports(all_list);
 	w_cleanup(windows); /* Clean windows lists */
