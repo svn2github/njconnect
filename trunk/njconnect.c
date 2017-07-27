@@ -3,7 +3,7 @@
  *
  * ncurses Jack patchbay
  *
- * Copyright (C) 2012-2013 Xj <xj@wp.pl>
+ * Copyright (C) Xj <xj@wp.pl>
  *   with lots of patches from G.raud Meyer
  *
  * based on naconnect by Nedko Arnaudov <nedko@arnaudov.name>
@@ -266,6 +266,11 @@ void w_draw_list(Window* W) {
 		wclrtoeol(W->window_ptr);
 		row++;
 	}
+}
+
+void w_draw(Window* W) {
+	wclear(W->window_ptr);
+	w_draw_list(W);
 	w_draw_border(W);
 	wrefresh(W->window_ptr);
 }
@@ -354,7 +359,7 @@ void w_cleanup(Window* windows) {
 }
 
 unsigned short
-select_window(Window* windows, int current, int new) {
+select_window(Window* windows, short current, short new) {
    if (new == current) {
       return current;
    } else if (new > 2) {
@@ -363,7 +368,7 @@ select_window(Window* windows, int current, int new) {
       new = 2;
    }
 
-   if (new == 2 && ! jack_slist_length( windows[2].list )) {
+   if (new == 2 && windows[2].count == 0) {
       new = (new > current) ? 0 : 1;
    }
 
@@ -450,7 +455,7 @@ void grid_draw_port_list ( WINDOW* w, JSList* list, int start, enum Orientation 
 	unsigned short rows, cols;
 	getmaxyx(w, rows, cols);
 
-	int row, col;
+	unsigned short row, col;
 	if ( ort == ORT_VERT ) {
 		row = 1; col = start;
 		mvwvline(w, row, col, ACS_VLINE, rows);
@@ -604,7 +609,7 @@ void show_help() {
 
 enum ViewMode { VIEW_MODE_NORMAL, VIEW_MODE_GRID };
 int main() {
-  unsigned short i, ret, rows, cols, window_selection=0;
+  unsigned short ret, rows, cols, window_selection=0;
   Window windows[3];
   WINDOW* status_window;
   WINDOW* grid_window = NULL;
@@ -662,15 +667,15 @@ loop:
 	if ( ViewMode == VIEW_MODE_GRID ) {
 		draw_grid( grid_window, windows[0].list, windows[1].list, windows[2].list );
 	} else { /* Assume VIEW_MODE_NORMAL */
-		for (i=0; i < 3; i++) w_draw_list(windows+i);
+		unsigned short i;
+		for (i=0; i < 3; i++) w_draw(windows+i);
 	}
 
 	draw_status(status_window, &nj );
 
 	int c = wgetch(status_window);
-
-	/************* Common keys ***********************/
 	switch ( c ) {
+	/************* Common keys ***********************/
 	case 'g': /* Toggle grid */
 		if ( ViewMode == VIEW_MODE_GRID ) {
 			ViewMode = VIEW_MODE_NORMAL;
@@ -773,11 +778,6 @@ refresh:
 	free_all_ports(all_list);
 	w_cleanup(windows); /* Clean windows lists */
 
-	if ( ViewMode == VIEW_MODE_NORMAL ) {
-		for(i=0; i < 3; i++) {
-			wclear(windows[i].window_ptr);
-		}
-	}
 	goto lists;
 quit:
 	free_all_ports(all_list);
