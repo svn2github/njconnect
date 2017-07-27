@@ -72,9 +72,9 @@ enum WinType {
    WIN_CONNECTIONS
 };
 
-struct window {
-  WINDOW * window_ptr;
-  JSList* list_ptr;
+typedef struct {
+  WINDOW* window_ptr;
+  JSList* list;
   bool selected;
   int height;
   int width;
@@ -82,52 +82,49 @@ struct window {
   unsigned short index;
   unsigned short count;
   enum WinType type;
-};
+} Window;
 
-struct port {
+typedef struct {
    char name[128];
    char type[32];
    int flags;
-};
+} Port;
 
-struct connection {
+typedef struct {
    const char* type;
-   struct port* in;
-   struct port* out;
-};
+   Port* in;
+   Port* out;
+} Connection;
 
-struct NJ {
+typedef struct {
    jack_client_t* client;
    jack_nframes_t sample_rate;
    jack_nframes_t buffer_size;
    bool rt;
    bool want_refresh;
    const char* err_msg;
-};
+} NJ;
 
 /* Function forgotten by Jack-Devs */
-JSList* jack_slist_nth(JSList* list_ptr, unsigned short n) {
+JSList* jack_slist_nth(JSList* list, unsigned short n) {
    unsigned short i = 0;
 
    JSList* node;
-   for(node=list_ptr; node ; node = jack_slist_next(node), i++ )
+   for(node=list; node ; node = jack_slist_next(node), i++ )
       if (i == n) return node;
 
    return NULL;
 }
 
-int jack_slist_find_pos(JSList* list_ptr, void *data) {
+int jack_slist_find_pos(JSList* list, void *data) {
    unsigned short i = 0;
 
    JSList* node;
-   for(node=list_ptr; node ; node = jack_slist_next(node), i++ )
+   for(node=list; node ; node = jack_slist_next(node), i++ )
       if (node->data == data) return i;
 
    return -1;
 }
-
-void window_item_next(struct window* w) { if (w->index < w->count - 1) w->index++; }
-void window_item_previous(struct window* w) { if (w->index > 0) w->index--; }
 
 void suppress_jack_log(const char* msg) {
 	/* Just suppress Jack SPAM here ;-) */
@@ -140,7 +137,7 @@ JSList* build_ports(jack_client_t* client) {
    if(! jports) return NULL;
 
    while(jports[count]) count++;
-   struct port* p = calloc(count, sizeof(struct port));
+   Port* p = calloc(count, sizeof(Port));
 
    JSList* new = NULL;
    for (i=0; jports[i]; ++i, p++) {
@@ -157,11 +154,11 @@ JSList* build_ports(jack_client_t* client) {
 }
 
 JSList*
-select_ports(JSList* list_ptr, int flags, const char* type) {
+select_ports(JSList* list, int flags, const char* type) {
    JSList* new = NULL;
    JSList* node;
-   for ( node=list_ptr; node; node=jack_slist_next(node) ) {
-       struct port* p = node->data;
+   for ( node=list; node; node=jack_slist_next(node) ) {
+       Port* p = node->data;
        if ( (p->flags & flags) && strcmp(p->type, type) == 0 )
           new = jack_slist_append(new, p);
    }
@@ -169,25 +166,25 @@ select_ports(JSList* list_ptr, int flags, const char* type) {
    return new;
 }
 
-struct port*
-get_port_by_name(JSList* list_ptr, const char* name) {
+Port*
+get_port_by_name(JSList* list, const char* name) {
    JSList* node;
 
-   for ( node=list_ptr; node; node=jack_slist_next(node) ) {
-       struct port* p = node->data;
+   for ( node=list; node; node=jack_slist_next(node) ) {
+       Port* p = node->data;
        if (strcmp(p->name, name) == 0) return p;
    }
    return NULL;
 }
 
 JSList*
-build_connections(jack_client_t* client, JSList* list_ptr, const char* type) {
+build_connections(jack_client_t* client, JSList* list, const char* type) {
    JSList* new = NULL;
 
    JSList* node;
-   for ( node=list_ptr; node; node=jack_slist_next(node) ) {
+   for ( node=list; node; node=jack_slist_next(node) ) {
        // For all Input ports
-       struct port *inp = node->data;
+       Port *inp = node->data;
        if(! (inp->flags & JackPortIsInput)) continue;
        if( strcmp(inp->type, type) != 0 ) continue;
 
@@ -197,10 +194,10 @@ build_connections(jack_client_t* client, JSList* list_ptr, const char* type) {
 
        unsigned short i;
        for (i=0; connections[i]; i++) {
-           struct port *outp = get_port_by_name(list_ptr, connections[i]);
+           Port *outp = get_port_by_name(list, connections[i]);
            if(!outp) continue; // WTF can't find OutPort in our list ?
 
-           struct connection* c = malloc(sizeof(struct connection));
+           Connection* c = malloc(sizeof(Connection));
            c->type = type;
            c->in = inp;
            c->out = outp;
@@ -212,120 +209,6 @@ build_connections(jack_client_t* client, JSList* list_ptr, const char* type) {
    return new;
 }
 
-void draw_border(struct window * window_ptr) {
-  int col = (window_ptr->width - strlen(window_ptr->name) - 4) / 2;
-  if (col < 0) col = 0;
-
-  /* 0, 0 gives default characters for the vertical and horizontal lines */
-  box(window_ptr->window_ptr, 0, 0);
-
-  if (window_ptr->selected) {
-     wattron(window_ptr->window_ptr, WA_BOLD|COLOR_PAIR(4));
-     mvwprintw( window_ptr->window_ptr, 0, col, "=[%s]=", window_ptr->name);
-     wattroff(window_ptr->window_ptr, WA_BOLD|COLOR_PAIR(4));
-  } else {
-     mvwprintw( window_ptr->window_ptr, 0, col, " [%s] ", window_ptr->name);
-  }
-}
-
-void draw_list(struct window* window_ptr) {
-	unsigned short rows, cols;
-	getmaxyx(window_ptr->window_ptr, rows, cols);
-
-	short offset = window_ptr->index + 3 - rows; // first displayed index
-	if(offset < 0) offset = 0;
-
-	unsigned short row =1, col = 1;
-	JSList* node;
-	for ( node=jack_slist_nth(window_ptr->list_ptr,offset); node; node=jack_slist_next(node) ) {
-		char fmt[40];
-		unsigned short color = (row == window_ptr->index - offset + 1)
-			? (window_ptr->selected) ? 3 : 2 : 1;
-		wattron(window_ptr->window_ptr, COLOR_PAIR(color));
-
-		switch(window_ptr->type) {
-		case WIN_PORTS:;
-			struct port* p = node->data;
-			snprintf(fmt, sizeof(fmt), "%%-%d.%ds", cols - 2, cols - 2);
-			mvwprintw(window_ptr->window_ptr, row, col, fmt, p->name);
-			break;
-		case WIN_CONNECTIONS:;
-			struct connection* c = node->data;
-			snprintf(fmt, sizeof(fmt), "%%%d.%ds -> %%-%d.%ds",
-				cols/2 - 3, cols/2 - 3, cols/2 - 3, cols/2 - 3);
-			mvwprintw(window_ptr->window_ptr, row, col, fmt, c->out->name, c->in->name);
-			break;
-		default:
-			ERR_OUT("Unknown WinType");
-		}
-		wattroff(window_ptr->window_ptr, COLOR_PAIR(color));
-		wclrtoeol(window_ptr->window_ptr);
-		row++;
-	}
-	draw_border(window_ptr);
-	wrefresh(window_ptr->window_ptr);
-}
-
-void
-create_window(struct window * window_ptr, int height, int width, int starty, int startx, const char * name, enum WinType type) {
-//  window_ptr->list_ptr = list_ptr;
-  window_ptr->window_ptr = newwin(height, width, starty, startx);
-  window_ptr->selected = FALSE;
-  window_ptr->width = width;
-  window_ptr->height = height;
-  window_ptr->name = name;
-  window_ptr->index = 0;
-  window_ptr->count = jack_slist_length(window_ptr->list_ptr);
-  window_ptr->type = type;
-//  scrollok(window_ptr->window_ptr, TRUE);
-}
-
-void
-resize_window(struct window * window_ptr, int height, int width, int starty, int startx) {
-//  delwin(window_ptr->window_ptr);
-//  window_ptr->window_ptr = newwin(height, width, starty, startx);
-  wresize(window_ptr->window_ptr, height, width);
-  mvwin(window_ptr->window_ptr, starty, startx);
-  window_ptr->width = width;
-  window_ptr->height = height;
-}
-
-const char*
-get_selected_port_name(struct window* window_ptr) {
-   JSList* list = jack_slist_nth(window_ptr->list_ptr, window_ptr->index);
-   if (!list) return NULL;
-
-   struct port* p = list->data;
-   return p->name;
-}
-
-bool
-w_connect(jack_client_t* client, struct window* window_src_ptr, struct window* window_dst_ptr) {
-   const char* src = get_selected_port_name(window_src_ptr);
-   if(!src) return FALSE;
-
-   const char* dst = get_selected_port_name(window_dst_ptr);
-   if(!dst) return FALSE;
-
-   if (jack_connect(client, src, dst) ) return FALSE;
-
-   /* Move selections to next items */
-   window_item_next(window_src_ptr);
-   window_item_next(window_dst_ptr);
-   return TRUE;
-}
-
-bool 
-w_disconnect(jack_client_t* client, struct window* window_ptr) {
-   JSList* list = jack_slist_nth(window_ptr->list_ptr, window_ptr->index);
-   if (! list) return FALSE;
-
-   struct connection* c = list->data;
-   if (window_ptr->index >= window_ptr->count - 1 && window_ptr->index)
-      window_ptr->index--;
-   return jack_disconnect(client, c->out->name, c->in->name) ? FALSE : TRUE;
-}
-
 void free_all_ports(JSList* all_ports) {
   /* First node is pointer to calloc-ed big chunk */
   if (! all_ports) return;
@@ -333,15 +216,132 @@ void free_all_ports(JSList* all_ports) {
   jack_slist_free(all_ports);
 }
 
-void cleanup(struct window* windows) {
+void w_draw_border(Window* W) {
+  int col = (W->width - strlen(W->name) - 4) / 2;
+  if (col < 0) col = 0;
+
+  /* 0, 0 gives default characters for the vertical and horizontal lines */
+  box(W->window_ptr, 0, 0);
+
+  if (W->selected) {
+     wattron(W->window_ptr, WA_BOLD|COLOR_PAIR(4));
+     mvwprintw(W->window_ptr, 0, col, "=[%s]=", W->name);
+     wattroff(W->window_ptr, WA_BOLD|COLOR_PAIR(4));
+  } else {
+     mvwprintw(W->window_ptr, 0, col, " [%s] ", W->name);
+  }
+}
+
+void w_draw_list(Window* W) {
+	unsigned short rows, cols;
+	getmaxyx(W->window_ptr, rows, cols);
+
+	short offset = W->index + 3 - rows; // first displayed index
+	if(offset < 0) offset = 0;
+
+	unsigned short row =1, col = 1;
+	JSList* node;
+	for ( node=jack_slist_nth(W->list,offset); node; node=jack_slist_next(node) ) {
+		char fmt[40];
+		unsigned short color = (row == W->index - offset + 1)
+			? (W->selected) ? 3 : 2 : 1;
+		wattron(W->window_ptr, COLOR_PAIR(color));
+
+		switch(W->type) {
+		case WIN_PORTS:;
+			Port* p = node->data;
+			snprintf(fmt, sizeof(fmt), "%%-%d.%ds", cols - 2, cols - 2);
+			mvwprintw(W->window_ptr, row, col, fmt, p->name);
+			break;
+		case WIN_CONNECTIONS:;
+			Connection* c = node->data;
+			snprintf(fmt, sizeof(fmt), "%%%d.%ds -> %%-%d.%ds",
+				cols/2 - 3, cols/2 - 3, cols/2 - 3, cols/2 - 3);
+			mvwprintw(W->window_ptr, row, col, fmt, c->out->name, c->in->name);
+			break;
+		default:
+			ERR_OUT("Unknown WinType");
+		}
+		wattroff(W->window_ptr, COLOR_PAIR(color));
+		wclrtoeol(W->window_ptr);
+		row++;
+	}
+	w_draw_border(W);
+	wrefresh(W->window_ptr);
+}
+
+void
+w_create(Window* W, int height, int width, int starty, int startx, const char* name, enum WinType type) {
+//  w->list = list;
+  W->window_ptr = newwin(height, width, starty, startx);
+  W->selected = FALSE;
+  W->width = width;
+  W->height = height;
+  W->name = name;
+  W->index = 0;
+  W->count = jack_slist_length(W->list);
+  W->type = type;
+//  scrollok(w->window_ptr, TRUE);
+}
+
+void
+resize_window(Window* W, int height, int width, int starty, int startx) {
+//  delwin(W->window_ptr);
+//  W->window_ptr = newwin(height, width, starty, startx);
+  wresize(W->window_ptr, height, width);
+  mvwin(W->window_ptr, starty, startx);
+  W->width = width;
+  W->height = height;
+}
+
+const char*
+get_selected_port_name(Window* W) {
+   JSList* list = jack_slist_nth(W->list, W->index);
+   if (!list) return NULL;
+
+   Port* p = list->data;
+   return p->name;
+}
+
+void w_item_next(Window* W) { if (W->index < W->count - 1) W->index++; }
+void w_item_previous(Window* W) { if (W->index > 0) W->index--; }
+
+bool
+w_connect(jack_client_t* client, Window* Wsrc, Window* Wdst) {
+   const char* src = get_selected_port_name(Wsrc);
+   if(!src) return FALSE;
+
+   const char* dst = get_selected_port_name(Wdst);
+   if(!dst) return FALSE;
+
+   if (jack_connect(client, src, dst) ) return FALSE;
+
+   /* Move selections to next items */
+   w_item_next(Wsrc);
+   w_item_next(Wdst);
+   return TRUE;
+}
+
+bool 
+w_disconnect(jack_client_t* client, Window* W) {
+   JSList* list = jack_slist_nth(W->list, W->index);
+   if (! list) return FALSE;
+
+   Connection* c = list->data;
+   if (W->index >= W->count - 1 && W->index)
+      W->index--;
+   return jack_disconnect(client, c->out->name, c->in->name) ? FALSE : TRUE;
+}
+
+void w_cleanup(Window* windows) {
   short i;
-  struct window* w = windows;
+  Window* w = windows;
 
   for(i = 0; i < 3; i++, w++) {
-     JSList* l = w->list_ptr;
+     JSList* l = w->list;
      if ( w->type == WIN_CONNECTIONS ) {
        JSList* node;
-       for ( node=w->list_ptr; node; node=jack_slist_next(node) )
+       for ( node=w->list; node; node=jack_slist_next(node) )
           free(node->data);
      }
      jack_slist_free(l);
@@ -349,7 +349,7 @@ void cleanup(struct window* windows) {
 }
 
 unsigned short
-select_window(struct window* windows, int current, int new) {
+select_window(Window* windows, int current, int new) {
    if (new == current) {
       return current;
    } else if (new > 2) {
@@ -358,7 +358,7 @@ select_window(struct window* windows, int current, int new) {
       new = 2;
    }
 
-   if (new == 2 && ! jack_slist_length( windows[2].list_ptr )) {
+   if (new == 2 && ! jack_slist_length( windows[2].list )) {
       new = (new > current) ? 0 : 1;
    }
 
@@ -368,14 +368,14 @@ select_window(struct window* windows, int current, int new) {
 }
 
 int graph_order_handler(void *arg) {
-    struct NJ* nj = arg;
+    NJ* nj = arg;
     nj->err_msg = GRAPH_CHANGED;
     nj->want_refresh = TRUE;
     return 0;
 }
 
 int buffer_size_handler( jack_nframes_t buffer_size, void *arg ) {
-    struct NJ* nj = arg;
+    NJ* nj = arg;
     nj->buffer_size = buffer_size;
     nj->err_msg = BUFFER_SIZE_CHANGED;
     nj->want_refresh = TRUE;
@@ -383,7 +383,7 @@ int buffer_size_handler( jack_nframes_t buffer_size, void *arg ) {
 }
 
 int sample_rate_handler( jack_nframes_t sample_rate, void *arg ) {
-    struct NJ* nj = arg;
+    NJ* nj = arg;
     nj->sample_rate = sample_rate;
     nj->err_msg = SAMPLE_RATE_CHANGED;
     nj->want_refresh = TRUE;
@@ -394,7 +394,7 @@ int process_handler ( jack_nframes_t nframes, void *arg ) {
     return 0;
 }
 
-void draw_status( WINDOW* w, struct NJ* nj ) {
+void draw_status( WINDOW* w, NJ* nj ) {
     wmove(w, 0, 0);
     wclrtoeol(w);
 
@@ -433,7 +433,7 @@ int get_max_port_name ( JSList* list ) {
     int ret = 0;
     JSList* node;
     for ( node=list; node; node=jack_slist_next(node) ) {
-        struct port* p = node->data;
+        Port* p = node->data;
         int len = strlen ( p->name );
         if ( len > ret ) ret = len;
     }
@@ -456,7 +456,7 @@ void grid_draw_port_list ( WINDOW* w, JSList* list, int start, enum Orientation 
 
 	JSList* node;
 	for ( node=jack_slist_nth(list,0); node; node=jack_slist_next(node) ) {
-		struct port* p = node->data;
+		Port* p = node->data;
 
 		/* Draw port name */
 		wattron(w, COLOR_PAIR(1));
@@ -490,7 +490,7 @@ void draw_grid ( WINDOW* w, JSList* list_out, JSList* list_in, JSList* list_con 
 	/* Draw Connections */
 	JSList* node;
 	for ( node=jack_slist_nth(list_con,0); node; node=jack_slist_next(node) ) {
-		struct connection* c = node->data;
+		Connection* c = node->data;
         
 		int in_pos = jack_slist_find_pos ( list_in, c->in );
 		int col = start_col + 1 + in_pos * 2;
@@ -511,7 +511,7 @@ void draw_grid ( WINDOW* w, JSList* list_out, JSList* list_in, JSList* list_con 
 	wrefresh(w);
 }
 
-bool init_jack( struct NJ* nj ) {
+bool init_jack( NJ* nj ) {
    /* Some Jack versions are very aggressive in breaking view */
    jack_set_info_function(suppress_jack_log);
    jack_set_error_function(suppress_jack_log);
@@ -600,13 +600,13 @@ void show_help() {
 enum ViewMode { VIEW_MODE_NORMAL, VIEW_MODE_GRID };
 int main() {
   unsigned short i, ret, rows, cols, window_selection=0;
-  struct window windows[3];
+  Window windows[3];
   WINDOW* status_window;
   WINDOW* grid_window = NULL;
   enum ViewMode ViewMode = VIEW_MODE_NORMAL;
   const char* PortsType = JACK_DEFAULT_MIDI_TYPE;
   JSList *all_list = NULL;
-  struct NJ nj;
+  NJ nj;
 
   /* Initialize ncurses */
   initscr();
@@ -642,21 +642,21 @@ int main() {
 
   /* Build ports, connections list */
   all_list = build_ports( nj.client );
-  windows[0].list_ptr = select_ports(all_list, JackPortIsOutput, PortsType);
-  windows[1].list_ptr = select_ports(all_list, JackPortIsInput, PortsType);
-  windows[2].list_ptr = build_connections( nj.client, all_list, PortsType );
+  windows[0].list = select_ports(all_list, JackPortIsOutput, PortsType);
+  windows[1].list = select_ports(all_list, JackPortIsInput, PortsType);
+  windows[2].list = build_connections( nj.client, all_list, PortsType );
 
   /* Create windows */
-  create_window(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_Y, "Output Ports", WIN_PORTS);
-  create_window(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X, "Input Ports", WIN_PORTS);
-  create_window(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X, CON_NAME_M, WIN_CONNECTIONS);
+  w_create(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_Y, "Output Ports", WIN_PORTS);
+  w_create(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X, "Input Ports", WIN_PORTS);
+  w_create(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X, CON_NAME_M, WIN_CONNECTIONS);
   windows[window_selection].selected = TRUE;
 
 loop:
 	if ( ViewMode == VIEW_MODE_GRID ) {
-		draw_grid( grid_window, windows[0].list_ptr, windows[1].list_ptr, windows[2].list_ptr );
+		draw_grid( grid_window, windows[0].list, windows[1].list, windows[2].list );
 	} else { /* Assume VIEW_MODE_NORMAL */
-		for (i=0; i < 3; i++) draw_list(windows+i);
+		for (i=0; i < 3; i++) w_draw_list(windows+i);
 	}
 
 	draw_status(status_window, &nj );
@@ -731,18 +731,18 @@ loop:
 		goto loop;
 	case 'D': /* Disconnect all */
 		while (w_disconnect( nj.client, windows+2) ) {
-			windows[2].list_ptr = jack_slist_remove(windows[2].list_ptr,
-			jack_slist_nth(windows[2].list_ptr, windows[2].index)->data);
+			windows[2].list = jack_slist_remove(windows[2].list,
+			jack_slist_nth(windows[2].list, windows[2].index)->data);
 			windows[2].count--;
 		}
 		goto refresh;
 	case 'j': /* Select next item on list */
 	case KEY_DOWN:
-		window_item_next(windows+window_selection);
+		w_item_next(windows+window_selection);
 		goto loop;
 	case KEY_UP: /* Select previous item on list */
 	case 'k':
-		window_item_previous(windows+window_selection);
+		w_item_previous(windows+window_selection);
 		goto loop;
 	case KEY_HOME: /* Select first item on list */
 		(windows+window_selection)->index = 0;
@@ -767,16 +767,16 @@ loop:
 refresh:
 	nj.want_refresh = FALSE;
 	free_all_ports(all_list);
-	cleanup(windows); /* Clean windows lists */
+	w_cleanup(windows); /* Clean windows lists */
 
 	all_list = build_ports( nj.client );
-	windows[0].list_ptr = select_ports(all_list, JackPortIsOutput, PortsType);
-	windows[1].list_ptr = select_ports(all_list, JackPortIsInput, PortsType);
-	windows[2].list_ptr = build_connections( nj.client, all_list, PortsType);
+	windows[0].list = select_ports(all_list, JackPortIsOutput, PortsType);
+	windows[1].list = select_ports(all_list, JackPortIsInput, PortsType);
+	windows[2].list = build_connections( nj.client, all_list, PortsType);
 
 	if ( ViewMode == VIEW_MODE_NORMAL ) {
 		for(i=0; i < 3; i++) {
-			windows[i].count = jack_slist_length( windows[i].list_ptr );
+			windows[i].count = jack_slist_length( windows[i].list );
 			if (windows[i].index > windows[i].count - 1) windows[i].index = 0;
 			wclear(windows[i].window_ptr);
 		}
@@ -784,7 +784,7 @@ refresh:
 	goto loop;
 quit:
 	free_all_ports(all_list);
-	cleanup(windows); /* Clean windows lists */
+	w_cleanup(windows); /* Clean windows lists */
 	jack_deactivate( nj.client );
 	jack_client_close( nj.client );
 qxit:
