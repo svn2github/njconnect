@@ -542,16 +542,11 @@ bool init_jack( struct NJ* nj ) {
    return true;
 }
 
-struct help {
+void show_help() {
+    struct help {
 	const char* keys;
 	const char* action;
-};
-
-void show_help() {
-    unsigned short rows, cols;
-    getmaxyx(stdscr, rows, cols);
-
-    WINDOW* w = newwin(rows , cols, 0, 0);
+    };
 
     struct help h[] = {
        { "a", "manage audio" },
@@ -575,6 +570,10 @@ void show_help() {
        { NULL, NULL }
     };
 
+    unsigned short rows, cols;
+    getmaxyx(stdscr, rows, cols);
+
+    WINDOW* w = newwin(rows , cols, 0, 0);
     wattron(w, COLOR_PAIR(6));
     wprintw( w, "\n"
                 "          _                                _\n"
