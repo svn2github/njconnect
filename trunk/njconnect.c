@@ -65,7 +65,7 @@ const char* ERR_DISCONNECT      = "Disconnection failed";
 const char* GRAPH_CHANGED       = "Graph changed";
 const char* SAMPLE_RATE_CHANGED = "Sample rate changed";
 const char* BUFFER_SIZE_CHANGED = "Buffer size changed";
-const char* DEFAULT_STATUS      = "->> Press SHIFT+H or ? for help << -";
+const char* DEFAULT_STATUS      = "->> Press SHIFT+H or ? for help <<-";
 
 enum WinType {
 	WIN_PORTS,
@@ -316,8 +316,7 @@ get_selected_port_name(Window* W) {
 void w_item_next(Window* W) { if (W->index < W->count - 1) W->index++; }
 void w_item_previous(Window* W) { if (W->index > 0) W->index--; }
 
-bool
-w_connect(jack_client_t* client, Window* Wsrc, Window* Wdst) {
+bool w_connect(jack_client_t* client, Window* Wsrc, Window* Wdst) {
 	const char* src = get_selected_port_name(Wsrc);
 	if(!src) return FALSE;
 
@@ -332,15 +331,22 @@ w_connect(jack_client_t* client, Window* Wsrc, Window* Wdst) {
 	return TRUE;
 }
 
-bool 
-w_disconnect(jack_client_t* client, Window* W) {
-	JSList* list = jack_slist_nth(W->list, W->index);
-	if (! list) return FALSE;
+bool w_disconnect(jack_client_t* client, Window* W) {
+	JSList* list_item = jack_slist_nth(W->list, W->index);
+	if (! list_item) return false;
 
-	Connection* c = list->data;
-	if (W->index >= W->count - 1 && W->index)
-		W->index--;
-	return jack_disconnect(client, c->out->name, c->in->name) ? FALSE : TRUE;
+	Connection* c = list_item->data;
+	int ret = jack_disconnect(client, c->out->name, c->in->name);
+	if ( ret != 0 ) return false;
+
+	/* Move back index if it was last on the list */
+	if (W->index >= W->count - 1)
+		w_item_previous(W);
+
+	W->list = jack_slist_remove_link(W->list, list_item);
+	W->count--;
+
+	return true;
 }
 
 void w_cleanup(Window* windows) {
@@ -380,7 +386,7 @@ select_window(Window* windows, short current, short new) {
 int graph_order_handler(void *arg) {
 	NJ* nj = arg;
 	nj->err_msg = GRAPH_CHANGED;
-	nj->want_refresh = TRUE;
+	nj->want_refresh = true;
 	return 0;
 }
 
@@ -388,7 +394,6 @@ int buffer_size_handler( jack_nframes_t buffer_size, void *arg ) {
 	NJ* nj = arg;
 	nj->buffer_size = buffer_size;
 	nj->err_msg = BUFFER_SIZE_CHANGED;
-	nj->want_refresh = TRUE;
 	return 0;
 }
 
@@ -396,11 +401,10 @@ int sample_rate_handler( jack_nframes_t sample_rate, void *arg ) {
 	NJ* nj = arg;
 	nj->sample_rate = sample_rate;
 	nj->err_msg = SAMPLE_RATE_CHANGED;
-	nj->want_refresh = TRUE;
 	return 0;
 }
 
-int process_handler ( jack_nframes_t nframes, void *arg ) {
+int process_handler( jack_nframes_t nframes, void *arg ) {
 	return 0;
 }
 
@@ -700,7 +704,6 @@ loop:
 		case KEY_EXIT: 
 			ret =0;
 			goto quit;
-
 		case 'r': /* Force refresh or terminal resize */
 		case KEY_RESIZE:
 			getmaxyx(stdscr, rows, cols);
@@ -717,8 +720,7 @@ loop:
 		case 'H':
 			show_help();
 			goto refresh;
-
-			/************* Normal mode keys *******************/
+		/************* Normal mode keys *******************/
 		case 'J': /* Select Next window */
 		case KEY_TAB:
 			window_selection = select_window(windows, window_selection, window_selection+1);
@@ -735,16 +737,12 @@ loop:
 			goto loop;
 		case 'd': /* Disconnect */
 		case KEY_BACKSPACE:
-			if (w_disconnect( nj.client, windows+2) ) goto refresh;
-			nj.err_msg = ERR_DISCONNECT;
+			if ( ! w_disconnect(nj.client,windows+2) )
+				nj.err_msg = ERR_DISCONNECT;
 			goto loop;
 		case 'D': /* Disconnect all */
-			while (w_disconnect( nj.client, windows+2) ) {
-				windows[2].list = jack_slist_remove(windows[2].list,
-					jack_slist_nth(windows[2].list, windows[2].index)->data);
-				windows[2].count--;
-			}
-			goto refresh;
+			while ( w_disconnect(nj.client,windows+2) );
+			goto loop;
 		case 'j': /* Select next item on list */
 		case KEY_DOWN:
 			w_item_next(windows+window_selection);
