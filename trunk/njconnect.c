@@ -541,7 +541,12 @@ void grid_draw_port_list ( WINDOW* w, JSList* list, int start, enum Orientation 
 	}
 }
 
-void draw_grid ( WINDOW* w, JSList* list_out, JSList* list_in, JSList* list_con ) {
+void nj_draw_grid ( NJ* nj ) {
+	WINDOW* w = nj->grid_window;
+	JSList* list_out = nj->windows[0].list;
+	JSList* list_in  = nj->windows[1].list;
+	JSList* list_con = nj->windows[2].list;
+
 	wclear ( w );
 
 	/* IN */
@@ -719,7 +724,7 @@ lists:
 
 loop:
 	if ( ViewMode == VIEW_MODE_GRID ) {
-		draw_grid( nj.grid_window, nj.windows[0].list, nj.windows[1].list, nj.windows[2].list );
+		nj_draw_grid( &nj );
 	} else { /* Assume VIEW_MODE_NORMAL */
 		nj_redraw_windows( &nj );
 	}
@@ -766,6 +771,7 @@ loop:
 
 			if ( ViewMode == VIEW_MODE_GRID )
 				wresize(nj.grid_window, rows - 1, cols);
+
 			goto refresh;
 		case '?': /* Help */
 		case 'H':
@@ -783,11 +789,10 @@ loop:
 		case 'c': /* Connect */
 		case '\n':
 		case KEY_ENTER:
-			if ( nj_connect(&nj) ) {
+			if ( nj_connect(&nj) )
 				goto refresh;
-			} else {
-				nj.err_msg = ERR_CONNECT;
-			}
+			
+			nj.err_msg = ERR_CONNECT;
 			goto loop;
 		case 'd': /* Disconnect */
 		case KEY_BACKSPACE:
