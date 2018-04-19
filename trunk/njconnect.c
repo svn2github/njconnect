@@ -103,6 +103,12 @@ typedef struct {
 	bool rt;
 	bool want_refresh;
 	const char* err_msg;
+
+	/* Windows */
+	unsigned short window_selection;
+	Window windows[3];
+	WINDOW* status_window;
+	WINDOW* grid_window;
 } NJ;
 
 /* Function forgotten by Jack-Devs */
@@ -366,23 +372,28 @@ void w_cleanup(Window* windows) {
 	}
 }
 
-unsigned short
-select_window(Window* windows, short current, short new) {
-	if (new == current) {
-		return current;
-	} else if (new > 2) {
+void nj_select_window( NJ* nj, short new ) {
+	short current = nj->window_selection;
+
+	if (new > 2) {
 		new = 0;
 	} else if (new < 0) {
 		new = 2;
 	}
 
-	if (new == 2 && windows[2].count == 0) {
+	/* Do not select connections window if is empty */
+	if (new == 2 && nj->windows[2].count == 0)
 		new = (new > current) ? 0 : 1;
-	}
 
-	windows[current].selected = FALSE;
-	windows[new].selected = TRUE;
-	return new;
+	if (new == current) return;
+
+	nj->windows[current].selected = FALSE;
+	nj->windows[new].selected = TRUE;
+	nj->window_selection = new;
+}
+
+Window* nj_get_selected_window( NJ* nj ) {
+	return &( nj->windows[ nj->window_selection ] );
 }
 
 int graph_order_handler(void *arg) {
@@ -410,7 +421,9 @@ int process_handler( jack_nframes_t nframes, void *arg ) {
 	return 0;
 }
 
-void draw_status( WINDOW* w, NJ* nj ) {
+void draw_status( NJ* nj ) {
+	WINDOW* w = nj->status_window;
+
 	wmove(w, 0, 0);
 	wclrtoeol(w);
 
@@ -615,14 +628,13 @@ void show_help() {
 
 enum ViewMode { VIEW_MODE_NORMAL, VIEW_MODE_GRID };
 int main() {
-	unsigned short ret, rows, cols, window_selection=0;
-	Window windows[3];
-	WINDOW* status_window;
-	WINDOW* grid_window = NULL;
+	unsigned short ret, rows, cols;
 	enum ViewMode ViewMode = VIEW_MODE_NORMAL;
 	const char* PortsType = JACK_DEFAULT_MIDI_TYPE;
 	JSList *all_list = NULL;
 	NJ nj;
+	nj.grid_window = NULL;
+	nj.window_selection = 0;
 
 	/* Initialize ncurses */
 	initscr();
@@ -652,54 +664,54 @@ int main() {
 	}
 
 	/* Create Help/Status Window */
-	status_window = newwin(WSTAT_H, WSTAT_W, WSTAT_Y, WSTAT_X);
-	keypad(status_window, TRUE);
-	wtimeout(status_window, 1000);
+	nj.status_window = newwin(WSTAT_H, WSTAT_W, WSTAT_Y, WSTAT_X);
+	keypad(nj.status_window, TRUE);
+	wtimeout(nj.status_window, 1000);
 
 	/* Create windows */
-	w_create(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_Y, "Output Ports", WIN_PORTS);
-	w_create(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X, "Input Ports", WIN_PORTS);
-	w_create(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X, CON_NAME_M, WIN_CONNECTIONS);
-	windows[window_selection].selected = TRUE;
+	w_create(nj.windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_Y, "Output Ports", WIN_PORTS);
+	w_create(nj.windows+1, WIN_H, WIN_W, WIN_Y, WIN_X, "Input Ports", WIN_PORTS);
+	w_create(nj.windows+2, WCON_H, WCON_W, WCON_Y, WCON_X, CON_NAME_M, WIN_CONNECTIONS);
+	nj.windows[nj.window_selection].selected = TRUE;
 
 lists:
 	/* Build ports, connections list */
 	all_list = build_ports( nj.client );
-	w_assign_list( windows, select_ports(all_list, JackPortIsOutput, PortsType) );
-	w_assign_list( windows+1, select_ports(all_list, JackPortIsInput, PortsType) );
-	w_assign_list( windows+2, build_connections( nj.client, all_list, PortsType ) );
+	w_assign_list( nj.windows, select_ports(all_list, JackPortIsOutput, PortsType) );
+	w_assign_list( nj.windows+1, select_ports(all_list, JackPortIsInput, PortsType) );
+	w_assign_list( nj.windows+2, build_connections( nj.client, all_list, PortsType ) );
 
 loop:
 	if ( ViewMode == VIEW_MODE_GRID ) {
-		draw_grid( grid_window, windows[0].list, windows[1].list, windows[2].list );
+		draw_grid( nj.grid_window, nj.windows[0].list, nj.windows[1].list, nj.windows[2].list );
 	} else { /* Assume VIEW_MODE_NORMAL */
 		unsigned short i;
-		for (i=0; i < 3; i++) w_draw(windows+i);
+		for (i=0; i < 3; i++) w_draw(nj.windows+i);
 	}
 
-	draw_status(status_window, &nj );
+	draw_status( &nj );
 
-	int c = wgetch(status_window);
+	int c = wgetch(nj.status_window);
 	switch ( c ) {
 		/************* Common keys ***********************/
 		case 'g': /* Toggle grid */
 			if ( ViewMode == VIEW_MODE_GRID ) {
 				ViewMode = VIEW_MODE_NORMAL;
-				delwin(grid_window);
-				grid_window = NULL;
+				delwin(nj.grid_window);
+				nj.grid_window = NULL;
 			} else { /* Assume VIEW_MODE_NORMAL */
 				ViewMode = VIEW_MODE_GRID;
 				unsigned short rows, cols;
 				getmaxyx(stdscr, rows, cols);
-				grid_window = newwin(rows - 1, cols, 0, 0);
+				nj.grid_window = newwin(rows - 1, cols, 0, 0);
 			}
 			goto refresh;
 		case 'a': /* Show Audio Ports */
-			windows[2].name = CON_NAME_A;
+			nj.windows[2].name = CON_NAME_A;
 			PortsType = JACK_DEFAULT_AUDIO_TYPE;
 			goto refresh;
 		case 'm': /* Show MIDI Ports */
-			windows[2].name = CON_NAME_M;
+			nj.windows[2].name = CON_NAME_M;
 			PortsType = JACK_DEFAULT_MIDI_TYPE;
 			goto refresh;
 		case 'q': /* Quit from app */
@@ -709,14 +721,14 @@ loop:
 		case 'r': /* Force refresh or terminal resize */
 		case KEY_RESIZE:
 			getmaxyx(stdscr, rows, cols);
-			wresize(status_window, WSTAT_H, WSTAT_W);
-			mvwin(status_window, WSTAT_Y, WSTAT_X);
-			w_resize(windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_X);
-			w_resize(windows+1, WIN_H, WIN_W, WIN_Y, WIN_X);
-			w_resize(windows+2, WCON_H, WCON_W, WCON_Y, WCON_X);
+			wresize(nj.status_window, WSTAT_H, WSTAT_W);
+			mvwin(nj.status_window, WSTAT_Y, WSTAT_X);
+			w_resize(nj.windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_X);
+			w_resize(nj.windows+1, WIN_H, WIN_W, WIN_Y, WIN_X);
+			w_resize(nj.windows+2, WCON_H, WCON_W, WCON_Y, WCON_X);
 
 			if ( ViewMode == VIEW_MODE_GRID )
-				wresize(grid_window, rows - 1, cols);
+				wresize(nj.grid_window, rows - 1, cols);
 			goto refresh;
 		case '?': /* Help */
 		case 'H':
@@ -725,50 +737,51 @@ loop:
 		/************* Normal mode keys *******************/
 		case 'J': /* Select Next window */
 		case KEY_TAB:
-			window_selection = select_window(windows, window_selection, window_selection+1);
+			nj_select_window( &nj, nj.window_selection + 1 );
 			goto loop;
 		case 'K': /* Select Previous window */
 		case KEY_BTAB:
-			window_selection = select_window(windows, window_selection, window_selection-1);
+			nj_select_window( &nj, nj.window_selection - 1 );
 			goto loop;
 		case 'c': /* Connect */
 		case '\n':
 		case KEY_ENTER:
-			if ( w_connect( nj.client, windows, windows+1) ) goto refresh;
+			if ( w_connect( nj.client, nj.windows, nj.windows+1) ) goto refresh;
 			nj.err_msg = ERR_CONNECT;
 			goto loop;
 		case 'd': /* Disconnect */
 		case KEY_BACKSPACE:
-			if ( ! w_disconnect(nj.client,windows+2) )
+			if ( ! w_disconnect(nj.client,nj.windows) )
 				nj.err_msg = ERR_DISCONNECT;
 			goto loop;
 		case 'D': /* Disconnect all */
-			while ( w_disconnect(nj.client,windows+2) );
+			while ( w_disconnect(nj.client,nj.windows+2) );
 			goto loop;
 		case 'j': /* Select next item on list */
 		case KEY_DOWN:
-			w_item_next(windows+window_selection);
+			w_item_next( nj_get_selected_window(&nj) );
 			goto loop;
 		case KEY_UP: /* Select previous item on list */
 		case 'k':
-			w_item_previous(windows+window_selection);
+			w_item_previous( nj_get_selected_window(&nj) );
 			goto loop;
 		case KEY_HOME: /* Select first item on list */
-			(windows+window_selection)->index = 0;
+			( nj_get_selected_window(&nj) )->index = 0;
 			goto loop;
-		case KEY_END: /* Select last item on list */
-			(windows+window_selection)->index = (windows+window_selection)->count - 1;
+		case KEY_END: ; /* Select last item on list */
+			Window* w = nj_get_selected_window(&nj);
+			w->index = w->count - 1;
 			goto loop;
 		case 'h': /* Select left window */
 		case KEY_LEFT:
-			window_selection = select_window(windows, window_selection, 0);
+			nj_select_window( &nj, 0 );
 			goto loop;
 		case 'l': /* Select right window */
 		case KEY_RIGHT:
-			window_selection = select_window(windows, window_selection, 1);
+			nj_select_window( &nj, 1 );
 			goto loop;
 		case ' ': /* Select bottom window */
-			window_selection = select_window(windows, window_selection, 2);
+			nj_select_window( &nj, 2 );
 			goto loop;
 	}
 
@@ -776,12 +789,12 @@ loop:
 refresh:
 	nj.want_refresh = FALSE;
 	free_all_ports(all_list);
-	w_cleanup(windows); /* Clean windows lists */
+	w_cleanup(nj.windows); /* Clean windows lists */
 
 	goto lists;
 quit:
 	free_all_ports(all_list);
-	w_cleanup(windows); /* Clean windows lists */
+	w_cleanup(nj.windows); /* Clean windows lists */
 	jack_deactivate( nj.client );
 	jack_client_close( nj.client );
 qxit:
