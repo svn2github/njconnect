@@ -324,32 +324,46 @@ get_selected_port_name(Window* W) {
 	return p->name;
 }
 
-void w_item_next(Window* W) { if (W->index < W->count - 1) W->index++; }
-void w_item_previous(Window* W) { if (W->index > 0) W->index--; }
+void w_item_next(Window* W) {
+	if (W->index < W->count - 1) {
+		W->index++;
+		W->redraw = true;
+	}
+}
 
-bool w_connect(jack_client_t* client, Window* Wsrc, Window* Wdst) {
+void w_item_previous(Window* W) {
+	if (W->index > 0) {
+		W->index--;
+		W->redraw = true;
+	}
+}
+
+bool nj_connect( NJ* nj ) {
+	Window* Wsrc = nj->windows;
+	Window* Wdst = nj->windows + 1;
+
 	const char* src = get_selected_port_name(Wsrc);
 	if(!src) return FALSE;
 
 	const char* dst = get_selected_port_name(Wdst);
 	if(!dst) return FALSE;
 
-	if (jack_connect(client, src, dst) ) return FALSE;
+	if (jack_connect(nj->client, src, dst) ) return FALSE;
 
 	/* Move selections to next items */
 	w_item_next(Wsrc);
 	w_item_next(Wdst);
-	Wsrc->redraw = true;
-	Wdst->redraw = true;
 	return TRUE;
 }
 
-bool w_disconnect(jack_client_t* client, Window* W) {
+bool nj_disconnect( NJ* nj ) {
+	Window* W = nj->windows + 2;
+
 	JSList* list_item = jack_slist_nth(W->list, W->index);
 	if (! list_item) return false;
 
 	Connection* c = list_item->data;
-	int ret = jack_disconnect(client, c->out->name, c->in->name);
+	int ret = jack_disconnect(nj->client, c->out->name, c->in->name);
 	if ( ret != 0 ) return false;
 
 	/* Move back index if it was last on the list */
@@ -769,26 +783,28 @@ loop:
 		case 'c': /* Connect */
 		case '\n':
 		case KEY_ENTER:
-			if ( w_connect( nj.client, nj.windows, nj.windows+1) ) goto refresh;
-			nj.err_msg = ERR_CONNECT;
+			if ( nj_connect(&nj) ) {
+				goto refresh;
+			} else {
+				nj.err_msg = ERR_CONNECT;
+			}
 			goto loop;
 		case 'd': /* Disconnect */
 		case KEY_BACKSPACE:
-			if ( ! w_disconnect(nj.client,nj.windows+2) )
+			if ( ! nj_disconnect(&nj ) )
 				nj.err_msg = ERR_DISCONNECT;
+
 			goto loop;
 		case 'D': /* Disconnect all */
-			while ( w_disconnect(nj.client,nj.windows+2) );
+			while ( nj_disconnect(&nj) );
 			goto loop;
 		case 'j': /* Select next item on list */
 		case KEY_DOWN:
 			w_item_next( selected_window );
-			selected_window->redraw = true;
 			goto loop;
 		case KEY_UP: /* Select previous item on list */
 		case 'k':
 			w_item_previous( selected_window );
-			selected_window->redraw = true;
 			goto loop;
 		case KEY_HOME: /* Select first item on list */
 			selected_window->index = 0;
