@@ -110,6 +110,7 @@ typedef struct {
 	Window windows[3];
 	WINDOW* status_window;
 	WINDOW* grid_window;
+	bool grid_redraw;
 } NJ;
 
 /* Function forgotten by Jack-Devs */
@@ -542,6 +543,10 @@ void grid_draw_port_list ( WINDOW* w, JSList* list, int start, enum Orientation 
 }
 
 void nj_draw_grid ( NJ* nj ) {
+	if ( ! nj->grid_redraw ) return;
+
+	nj->grid_redraw = false;
+
 	WINDOW* w = nj->grid_window;
 	JSList* list_out = nj->windows[0].list;
 	JSList* list_in  = nj->windows[1].list;
@@ -675,6 +680,7 @@ int main() {
 	JSList *all_list = NULL;
 	NJ nj;
 	nj.grid_window = NULL;
+	nj.grid_redraw = true;
 	nj.window_selection = 0;
 
 	/* Initialize ncurses */
@@ -749,10 +755,16 @@ loop:
 			}
 			goto refresh;
 		case 'a': /* Show Audio Ports */
+			if ( strcmp(PortsType,JACK_DEFAULT_AUDIO_TYPE) == 0 )
+				goto loop;
+
 			nj.windows[2].name = CON_NAME_A;
 			PortsType = JACK_DEFAULT_AUDIO_TYPE;
 			goto refresh;
 		case 'm': /* Show MIDI Ports */
+			if ( strcmp(PortsType,JACK_DEFAULT_MIDI_TYPE) == 0 )
+				goto loop;
+
 			nj.windows[2].name = CON_NAME_M;
 			PortsType = JACK_DEFAULT_MIDI_TYPE;
 			goto refresh;
@@ -835,6 +847,9 @@ loop:
 	if (! nj.want_refresh) goto loop;
 refresh:
 	nj.want_refresh = FALSE;
+	if ( ViewMode == VIEW_MODE_GRID )
+		nj.grid_redraw = true;
+
 	free_all_ports(all_list);
 	w_cleanup(nj.windows); /* Clean windows lists */
 
