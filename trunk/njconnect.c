@@ -76,6 +76,7 @@ typedef struct {
 	WINDOW* window_ptr;
 	JSList* list;
 	bool selected;
+	bool redraw;
 	int height;
 	int width;
 	const char * name;
@@ -292,6 +293,7 @@ w_create(Window* W, int height, int width, int starty, int startx, const char* n
 	W->name = name;
 	W->index = 0;
 	W->type = type;
+	W->redraw = true;
 	//  scrollok(w->window_ptr, TRUE);
 }
 
@@ -310,6 +312,7 @@ w_resize(Window* W, int height, int width, int starty, int startx) {
 	mvwin(W->window_ptr, starty, startx);
 	W->width = width;
 	W->height = height;
+	W->redraw = true;
 }
 
 const char*
@@ -336,6 +339,8 @@ bool w_connect(jack_client_t* client, Window* Wsrc, Window* Wdst) {
 	/* Move selections to next items */
 	w_item_next(Wsrc);
 	w_item_next(Wdst);
+	Wsrc->redraw = true;
+	Wdst->redraw = true;
 	return TRUE;
 }
 
@@ -353,6 +358,7 @@ bool w_disconnect(jack_client_t* client, Window* W) {
 
 	W->list = jack_slist_remove_link(W->list, list_item);
 	W->count--;
+	W->redraw = true;
 
 	return true;
 }
@@ -369,6 +375,7 @@ void w_cleanup(Window* windows) {
 				free(node->data);
 		}
 		jack_slist_free(l);
+		w->redraw = true;
 	}
 }
 
@@ -388,7 +395,11 @@ void nj_select_window( NJ* nj, short new ) {
 	if (new == current) return;
 
 	nj->windows[current].selected = FALSE;
+	nj->windows[current].redraw = true;
+
 	nj->windows[new].selected = TRUE;
+	nj->windows[new].redraw = true;
+
 	nj->window_selection = new;
 }
 
@@ -456,6 +467,17 @@ void draw_status( NJ* nj ) {
 	wattroff(w, COLOR_PAIR(7));
 
 	wrefresh(w);
+}
+
+void nj_redraw_windows( NJ* nj ) {
+	unsigned short i;
+	for ( i=0; i < 3; i++ ) {
+		Window* w = nj->windows + i;
+		if ( w->redraw ) {
+			w->redraw = false;
+			w_draw( w );
+		}
+	}
 }
 
 int get_max_port_name ( JSList* list ) {
@@ -685,11 +707,12 @@ loop:
 	if ( ViewMode == VIEW_MODE_GRID ) {
 		draw_grid( nj.grid_window, nj.windows[0].list, nj.windows[1].list, nj.windows[2].list );
 	} else { /* Assume VIEW_MODE_NORMAL */
-		unsigned short i;
-		for (i=0; i < 3; i++) w_draw(nj.windows+i);
+		nj_redraw_windows( &nj );
 	}
 
 	draw_status( &nj );
+
+	Window* selected_window = nj_get_selected_window(&nj);
 
 	int c = wgetch(nj.status_window);
 	switch ( c ) {
@@ -751,7 +774,7 @@ loop:
 			goto loop;
 		case 'd': /* Disconnect */
 		case KEY_BACKSPACE:
-			if ( ! w_disconnect(nj.client,nj.windows) )
+			if ( ! w_disconnect(nj.client,nj.windows+2) )
 				nj.err_msg = ERR_DISCONNECT;
 			goto loop;
 		case 'D': /* Disconnect all */
@@ -759,18 +782,21 @@ loop:
 			goto loop;
 		case 'j': /* Select next item on list */
 		case KEY_DOWN:
-			w_item_next( nj_get_selected_window(&nj) );
+			w_item_next( selected_window );
+			selected_window->redraw = true;
 			goto loop;
 		case KEY_UP: /* Select previous item on list */
 		case 'k':
-			w_item_previous( nj_get_selected_window(&nj) );
+			w_item_previous( selected_window );
+			selected_window->redraw = true;
 			goto loop;
 		case KEY_HOME: /* Select first item on list */
-			( nj_get_selected_window(&nj) )->index = 0;
+			selected_window->index = 0;
+			selected_window->redraw = true;
 			goto loop;
-		case KEY_END: ; /* Select last item on list */
-			Window* w = nj_get_selected_window(&nj);
-			w->index = w->count - 1;
+		case KEY_END: /* Select last item on list */
+			selected_window->index = selected_window->count - 1;
+			selected_window->redraw = true;
 			goto loop;
 		case 'h': /* Select left window */
 		case KEY_LEFT:
