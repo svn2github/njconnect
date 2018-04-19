@@ -626,7 +626,7 @@ void show_help() {
 		{ "SHIFT + TAB / K", "select previous window" },
 		{ "SPACE", "select connections window" },
 		{ "LEFT / h", "select output ports window" },
-		{ "RIGHT / j", "select input ports window" },
+		{ "RIGHT / l", "select input ports window" },
 		{ "UP / k", "select previous item on list" },
 		{ "DOWN / j", "select previous item on list" },
 		{ "HOME", "select first item on list" },
