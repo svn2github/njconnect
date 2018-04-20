@@ -303,8 +303,8 @@ void w_draw_list(Window* W) {
 }
 
 void w_draw(Window* W) {
-	wclear(W->window_ptr);
 	w_draw_list(W);
+	wclrtobot(W->window_ptr);
 	w_draw_border(W);
 	wrefresh(W->window_ptr);
 }
@@ -441,6 +441,20 @@ Window* nj_get_selected_window( NJ* nj ) {
 	return &( nj->windows[ nj->window_selection ] );
 }
 
+void nj_set_redraw( NJ* nj ) {
+	Window* sw = nj_get_selected_window( nj );
+	switch ( sw->type ) {
+		case WIN_PORTS:
+			nj->windows[0].redraw = true;
+			nj->windows[1].redraw = true;
+			break;
+		case WIN_CONNECTIONS:
+			nj->windows[2].redraw = true;
+			break;
+	}
+	nj->need_mark = true;
+}
+
 int graph_order_handler(void *arg) {
 	NJ* nj = arg;
 	nj->err_msg = GRAPH_CHANGED;
@@ -470,7 +484,6 @@ void draw_status( NJ* nj ) {
 	WINDOW* w = nj->status_window;
 
 	wmove(w, 0, 0);
-	wclrtoeol(w);
 
 	// Message
 	int color;
@@ -483,6 +496,8 @@ void draw_status( NJ* nj ) {
 		msg = DEFAULT_STATUS;
 		color = 5;
 	}
+
+	wclrtoeol(w);
 
 	// Jack stuff
 	wattron(w, COLOR_PAIR(color));
@@ -870,28 +885,20 @@ loop:
 		case 'j': /* Select next item on list */
 		case KEY_DOWN:
 			w_item_next( selected_window );
-			nj.windows[0].redraw = true;
-			nj.windows[1].redraw = true;
-			nj.need_mark = true;
+			nj_set_redraw( &nj );
 			goto loop;
 		case KEY_UP: /* Select previous item on list */
 		case 'k':
 			w_item_previous( selected_window );
-			nj.windows[0].redraw = true;
-			nj.windows[1].redraw = true;
-			nj.need_mark = true;
+			nj_set_redraw( &nj );
 			goto loop;
 		case KEY_HOME: /* Select first item on list */
 			selected_window->index = 0;
-			nj.windows[0].redraw = true;
-			nj.windows[1].redraw = true;
-			nj.need_mark = true;
+			nj_set_redraw( &nj );
 			goto loop;
 		case KEY_END: /* Select last item on list */
 			selected_window->index = selected_window->count - 1;
-			nj.windows[0].redraw = true;
-			nj.windows[1].redraw = true;
-			nj.need_mark = true;
+			nj_set_redraw( &nj );
 			goto loop;
 		case 'h': /* Select left window */
 		case KEY_LEFT:
