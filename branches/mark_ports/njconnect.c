@@ -112,6 +112,7 @@ typedef struct {
 	WINDOW* status_window;
 	WINDOW* grid_window;
 	bool grid_redraw;
+	bool need_mark;
 } NJ;
 
 /* Function forgotten by Jack-Devs */
@@ -324,6 +325,7 @@ void
 w_assign_list(Window* W, JSList* list) {
 	W->list = list;
 	W->count = jack_slist_length(W->list);
+	W->redraw = true;
 	if (W->index > W->count - 1) W->index = 0;
 }
 
@@ -347,19 +349,8 @@ get_selected_port(Window* W) {
 	return p;
 }
 
-void w_item_next(Window* W) {
-	if (W->index < W->count - 1) {
-		W->index++;
-		W->redraw = true;
-	}
-}
-
-void w_item_previous(Window* W) {
-	if (W->index > 0) {
-		W->index--;
-		W->redraw = true;
-	}
-}
+void w_item_next(Window* W) { if (W->index < W->count - 1) W->index++; }
+void w_item_previous(Window* W) { if (W->index > 0) W->index--; }
 
 bool nj_connect( NJ* nj ) {
 	Window* Wsrc = nj->windows;
@@ -376,6 +367,8 @@ bool nj_connect( NJ* nj ) {
 	/* Move selections to next items */
 	w_item_next(Wsrc);
 	w_item_next(Wdst);
+	Wsrc->redraw = true;
+	Wdst->redraw = true;
 	return TRUE;
 }
 
@@ -396,6 +389,7 @@ bool nj_disconnect( NJ* nj ) {
 	W->list = jack_slist_remove_link(W->list, list_item);
 	W->count--;
 	W->redraw = true;
+	nj->need_mark = true;
 
 	return true;
 }
@@ -694,21 +688,22 @@ void show_help() {
 	delwin(w);
 }
 
-void unmark_all_ports( JSList* all_ports ) {
+void nj_mark_ports ( NJ* nj, JSList* all_ports ) {
+	if ( ! nj->need_mark ) return;
+	nj->need_mark=false;
+
+	/* Unmark all ports */
 	JSList* node;
 	for ( node=all_ports; node; node=jack_slist_next(node) ) {
 		Port* p = node->data;
 		p->mark = false;
 	}
-}
 
-void mark_ports ( NJ* nj ) {
+	/* Mark connected */
 	Port* current_out = get_selected_port( nj->windows );
 	Port* current_in  = get_selected_port( nj->windows + 1 );
 
 	JSList* list_con = nj->windows[2].list;
-
-	JSList* node;
 	for ( node=list_con; node; node=jack_slist_next(node) ) {
 		Connection* c = node->data;
 		if ( c->in == current_in )
@@ -776,13 +771,13 @@ lists:
 	w_assign_list( nj.windows, select_ports(all_list, JackPortIsOutput, PortsType) );
 	w_assign_list( nj.windows+1, select_ports(all_list, JackPortIsInput, PortsType) );
 	w_assign_list( nj.windows+2, build_connections( nj.client, all_list, PortsType ) );
+	nj.need_mark = true;
 
 loop:
 	if ( ViewMode == VIEW_MODE_GRID ) {
 		nj_draw_grid( &nj );
 	} else { /* Assume VIEW_MODE_NORMAL */
-		unmark_all_ports( all_list );
-		mark_ports( &nj );
+		nj_mark_ports( &nj, all_list );
 		nj_redraw_windows( &nj );
 	}
 
@@ -871,22 +866,26 @@ loop:
 			w_item_next( selected_window );
 			nj.windows[0].redraw = true;
 			nj.windows[1].redraw = true;
+			nj.need_mark = true;
 			goto loop;
 		case KEY_UP: /* Select previous item on list */
 		case 'k':
 			w_item_previous( selected_window );
 			nj.windows[0].redraw = true;
 			nj.windows[1].redraw = true;
+			nj.need_mark = true;
 			goto loop;
 		case KEY_HOME: /* Select first item on list */
 			selected_window->index = 0;
 			nj.windows[0].redraw = true;
 			nj.windows[1].redraw = true;
+			nj.need_mark = true;
 			goto loop;
 		case KEY_END: /* Select last item on list */
 			selected_window->index = selected_window->count - 1;
 			nj.windows[0].redraw = true;
 			nj.windows[1].redraw = true;
+			nj.need_mark = true;
 			goto loop;
 		case 'h': /* Select left window */
 		case KEY_LEFT:
