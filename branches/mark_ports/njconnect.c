@@ -244,6 +244,25 @@ void w_draw_border(Window* W) {
 	}
 }
 
+unsigned short
+choose_color( Window* W, JSList* node, bool item_selected ) {
+	bool item_mark = false;
+	if ( W->type == WIN_PORTS ) {
+		Port* p = node->data;
+		if ( p->mark )
+			item_mark = true;
+	}
+
+	if ( ! item_selected )
+		return item_mark ? 8 : 1;
+
+	if ( W->selected )
+		return 3;
+
+	/* not selected window, selected item */
+	return item_mark ? 9 : 2;
+}
+
 void w_draw_list(Window* W) {
 	unsigned short rows, cols;
 	getmaxyx(W->window_ptr, rows, cols);
@@ -255,35 +274,17 @@ void w_draw_list(Window* W) {
 	JSList* node;
 	for ( node=jack_slist_nth(W->list,offset); node; node=jack_slist_next(node) ) {
 		char fmt[40];
-		unsigned short color;
 		bool item_selected = ( row == W->index - offset + 1 );
-		bool item_mark = false;
 
-		if ( W->type == WIN_PORTS ) {
-			Port* p = node->data;
-			if ( p->mark )
-				item_mark = true;
-		}
-
-		if ( item_selected ) {
-			if ( W->selected )
-				color = 3;
-			else
-				color = item_mark ? 9 : 2;
-		} else {
-			color = item_mark ? 8 : 1;
-		}
-		
+		unsigned short color = choose_color( W, node, item_selected );
 		wattron(W->window_ptr, COLOR_PAIR(color));
 
 		switch( W->type ) {
 			case WIN_PORTS:;
 				Port* p = node->data;
-				if ( p->mark ) {
-					snprintf(fmt, sizeof(fmt), "* %%-%d.%ds", cols - 2, cols - 2);
-				} else {
-					snprintf(fmt, sizeof(fmt), "%%-%d.%ds", cols - 2, cols - 2);
-				}
+				const char* pfmt = p->mark ? "*%%-%d.%ds", : "%%-%d.%ds";
+
+				snprintf(fmt, sizeof(fmt), pfmt, cols - 2, cols - 2);
 				mvwprintw(W->window_ptr, row, col, fmt, p->name);
 				break;
 			case WIN_CONNECTIONS:;
@@ -367,8 +368,6 @@ bool nj_connect( NJ* nj ) {
 	/* Move selections to next items */
 	w_item_next(Wsrc);
 	w_item_next(Wdst);
-	Wsrc->redraw = true;
-	Wdst->redraw = true;
 	return true;
 }
 
