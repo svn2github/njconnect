@@ -89,6 +89,7 @@ typedef struct {
 	char name[128];
 	char type[32];
 	int flags;
+	bool mark;
 } Port;
 
 typedef struct {
@@ -111,6 +112,7 @@ typedef struct {
 	WINDOW* status_window;
 	WINDOW* grid_window;
 	bool grid_redraw;
+	bool need_mark;
 } NJ;
 
 /* Function forgotten by Jack-Devs */
@@ -242,6 +244,25 @@ void w_draw_border(Window* W) {
 	}
 }
 
+unsigned short
+choose_color( Window* W, JSList* node, bool item_selected ) {
+	bool item_mark = false;
+	if ( W->type == WIN_PORTS ) {
+		Port* p = node->data;
+		if ( p->mark )
+			item_mark = true;
+	}
+
+	if ( ! item_selected )
+		return item_mark ? 8 : 1;
+
+	if ( W->selected )
+		return 3;
+
+	/* not selected window, selected item */
+	return item_mark ? 9 : 2;
+}
+
 void w_draw_list(Window* W) {
 	unsigned short rows, cols;
 	getmaxyx(W->window_ptr, rows, cols);
@@ -249,18 +270,21 @@ void w_draw_list(Window* W) {
 	short offset = W->index + 3 - rows; // first displayed index
 	if(offset < 0) offset = 0;
 
-	unsigned short row =1, col = 1;
+	unsigned short row = 1, col = 1;
 	JSList* node;
 	for ( node=jack_slist_nth(W->list,offset); node; node=jack_slist_next(node) ) {
 		char fmt[40];
-		unsigned short color = (row == W->index - offset + 1)
-			? (W->selected) ? 3 : 2 : 1;
+		bool item_selected = ( row == W->index - offset + 1 );
+
+		unsigned short color = choose_color( W, node, item_selected );
 		wattron(W->window_ptr, COLOR_PAIR(color));
 
-		switch(W->type) {
+		switch( W->type ) {
 			case WIN_PORTS:;
 				Port* p = node->data;
-				snprintf(fmt, sizeof(fmt), "%%-%d.%ds", cols - 2, cols - 2);
+				const char* pfmt = p->mark ? "*%%-%d.%ds" : "%%-%d.%ds";
+
+				snprintf(fmt, sizeof(fmt), pfmt, cols - 2, cols - 2);
 				mvwprintw(W->window_ptr, row, col, fmt, p->name);
 				break;
 			case WIN_CONNECTIONS:;
@@ -288,20 +312,21 @@ void w_draw(Window* W) {
 void
 w_create(Window* W, int height, int width, int starty, int startx, const char* name, enum WinType type) {
 	W->window_ptr = newwin(height, width, starty, startx);
-	W->selected = FALSE;
+	W->selected = false;
 	W->width = width;
 	W->height = height;
 	W->name = name;
 	W->index = 0;
 	W->type = type;
 	W->redraw = true;
-	//  scrollok(w->window_ptr, TRUE);
+	//  scrollok(w->window_ptr, true);
 }
 
 void
 w_assign_list(Window* W, JSList* list) {
 	W->list = list;
 	W->count = jack_slist_length(W->list);
+	W->redraw = true;
 	if (W->index > W->count - 1) W->index = 0;
 }
 
@@ -316,66 +341,65 @@ w_resize(Window* W, int height, int width, int starty, int startx) {
 	W->redraw = true;
 }
 
-const char*
-get_selected_port_name(Window* W) {
+Port*
+get_selected_port(Window* W) {
 	JSList* list = jack_slist_nth(W->list, W->index);
 	if (!list) return NULL;
 
 	Port* p = list->data;
-	return p->name;
+	return p;
 }
 
-void w_item_next(Window* W) {
-	if (W->index < W->count - 1) {
-		W->index++;
-		W->redraw = true;
-	}
-}
-
-void w_item_previous(Window* W) {
-	if (W->index > 0) {
-		W->index--;
-		W->redraw = true;
-	}
-}
+void w_item_next(Window* W) { if (W->index < W->count - 1) W->index++; }
+void w_item_previous(Window* W) { if (W->index > 0) W->index--; }
 
 bool nj_connect( NJ* nj ) {
 	Window* Wsrc = nj->windows;
 	Window* Wdst = nj->windows + 1;
 
-	const char* src = get_selected_port_name(Wsrc);
-	if(!src) return FALSE;
+	Port* src = get_selected_port(Wsrc);
+	if(!src) return false;
 
-	const char* dst = get_selected_port_name(Wdst);
-	if(!dst) return FALSE;
+	Port* dst = get_selected_port(Wdst);
+	if(!dst) return false;
 
-	if (jack_connect(nj->client, src, dst) ) return FALSE;
+	if (jack_connect(nj->client, src->name, dst->name) ) return false;
 
 	/* Move selections to next items */
 	w_item_next(Wsrc);
 	w_item_next(Wdst);
-	return TRUE;
+	return true;
 }
 
 bool nj_disconnect( NJ* nj ) {
 	Window* W = nj->windows + 2;
 
 	JSList* list_item = jack_slist_nth(W->list, W->index);
-	if (! list_item) return false;
+	if ( ! list_item) return false;
 
 	Connection* c = list_item->data;
 	int ret = jack_disconnect(nj->client, c->out->name, c->in->name);
 	if ( ret != 0 ) return false;
 
-	/* Move back index if it was last on the list */
-	if (W->index >= W->count - 1)
-		w_item_previous(W);
-
-	W->list = jack_slist_remove_link(W->list, list_item);
-	W->count--;
-	W->redraw = true;
-
 	return true;
+}
+
+bool nj_disconnect_all( NJ* nj ) {
+	Window* W = nj->windows + 2;
+
+	JSList* node;
+	for ( node=W->list; node; node=jack_slist_next(node) ) {
+		Connection* c = node->data;
+		int ret = jack_disconnect(nj->client, c->out->name, c->in->name);
+		if ( ret != 0 ) return false;
+	}
+	return true;
+}
+
+void free_connections( JSList* list_con ) {
+	JSList* node;
+	for ( node=list_con; node; node=jack_slist_next(node) )
+		free(node->data);
 }
 
 void w_cleanup(Window* windows) {
@@ -384,11 +408,6 @@ void w_cleanup(Window* windows) {
 
 	for(i = 0; i < 3; i++, w++) {
 		JSList* l = w->list;
-		if ( w->type == WIN_CONNECTIONS ) {
-			JSList* node;
-			for ( node=w->list; node; node=jack_slist_next(node) )
-				free(node->data);
-		}
 		jack_slist_free(l);
 		w->redraw = true;
 	}
@@ -409,10 +428,10 @@ void nj_select_window( NJ* nj, short new ) {
 
 	if (new == current) return;
 
-	nj->windows[current].selected = FALSE;
+	nj->windows[current].selected = false;
 	nj->windows[current].redraw = true;
 
-	nj->windows[new].selected = TRUE;
+	nj->windows[new].selected = true;
 	nj->windows[new].redraw = true;
 
 	nj->window_selection = new;
@@ -603,7 +622,7 @@ bool init_jack( NJ* nj ) {
 	nj->buffer_size = jack_get_buffer_size( nj->client );
 	nj->rt = jack_is_realtime( nj->client );
 	nj->err_msg = NULL;
-	nj->want_refresh = FALSE;
+	nj->want_refresh = false;
 
 	jack_set_graph_order_callback( nj->client, graph_order_handler, nj );
 	jack_set_buffer_size_callback( nj->client, buffer_size_handler, nj );
@@ -672,12 +691,38 @@ void show_help() {
 	delwin(w);
 }
 
+void nj_mark_ports ( NJ* nj, JSList* all_ports ) {
+	if ( ! nj->need_mark ) return;
+	nj->need_mark=false;
+
+	/* Unmark all ports */
+	JSList* node;
+	for ( node=all_ports; node; node=jack_slist_next(node) ) {
+		Port* p = node->data;
+		p->mark = false;
+	}
+
+	/* Mark connected */
+	Port* current_out = get_selected_port( nj->windows );
+	Port* current_in  = get_selected_port( nj->windows + 1 );
+
+	JSList* list_con = nj->windows[2].list;
+	for ( node=list_con; node; node=jack_slist_next(node) ) {
+		Connection* c = node->data;
+		if ( c->in == current_in )
+			c->out->mark = true;
+
+		if ( c->out == current_out )
+			c->in->mark = true;
+	}
+}
+
 enum ViewMode { VIEW_MODE_NORMAL, VIEW_MODE_GRID };
 int main() {
 	unsigned short ret, rows, cols;
 	enum ViewMode ViewMode = VIEW_MODE_NORMAL;
 	const char* PortsType = JACK_DEFAULT_MIDI_TYPE;
-	JSList *all_list = NULL;
+	JSList* all_ports_list = NULL;
 	NJ nj;
 	nj.grid_window = NULL;
 	nj.grid_redraw = true;
@@ -689,7 +734,7 @@ int main() {
 	noecho();
 	getmaxyx(stdscr, rows, cols);
 
-	if (has_colors() == FALSE) {
+	if (has_colors() == false) {
 		ERR_OUT("Your terminal does not support color");
 		ret = -1;
 		goto qxit;
@@ -704,6 +749,8 @@ int main() {
 	init_pair(5, COLOR_BLACK, COLOR_RED);
 	init_pair(6, COLOR_YELLOW, -1);
 	init_pair(7, COLOR_BLUE, -1);
+	init_pair(8, COLOR_RED, -1);
+	init_pair(9, COLOR_RED, COLOR_WHITE);
 
 	if ( ! init_jack(&nj) ) {
 		ret = 2;
@@ -712,26 +759,28 @@ int main() {
 
 	/* Create Help/Status Window */
 	nj.status_window = newwin(WSTAT_H, WSTAT_W, WSTAT_Y, WSTAT_X);
-	keypad(nj.status_window, TRUE);
+	keypad(nj.status_window, true);
 	wtimeout(nj.status_window, 1000);
 
 	/* Create windows */
 	w_create(nj.windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_Y, "Output Ports", WIN_PORTS);
 	w_create(nj.windows+1, WIN_H, WIN_W, WIN_Y, WIN_X, "Input Ports", WIN_PORTS);
 	w_create(nj.windows+2, WCON_H, WCON_W, WCON_Y, WCON_X, CON_NAME_M, WIN_CONNECTIONS);
-	nj.windows[nj.window_selection].selected = TRUE;
+	nj.windows[nj.window_selection].selected = true;
 
 lists:
 	/* Build ports, connections list */
-	all_list = build_ports( nj.client );
-	w_assign_list( nj.windows, select_ports(all_list, JackPortIsOutput, PortsType) );
-	w_assign_list( nj.windows+1, select_ports(all_list, JackPortIsInput, PortsType) );
-	w_assign_list( nj.windows+2, build_connections( nj.client, all_list, PortsType ) );
+	all_ports_list = build_ports( nj.client );
+	w_assign_list( nj.windows, select_ports(all_ports_list, JackPortIsOutput, PortsType) );
+	w_assign_list( nj.windows+1, select_ports(all_ports_list, JackPortIsInput, PortsType) );
+	w_assign_list( nj.windows+2, build_connections( nj.client, all_ports_list, PortsType ) );
+	nj.need_mark = true;
 
 loop:
 	if ( ViewMode == VIEW_MODE_GRID ) {
 		nj_draw_grid( &nj );
 	} else { /* Assume VIEW_MODE_NORMAL */
+		nj_mark_ports( &nj, all_ports_list );
 		nj_redraw_windows( &nj );
 	}
 
@@ -808,28 +857,41 @@ loop:
 			goto loop;
 		case 'd': /* Disconnect */
 		case KEY_BACKSPACE:
-			if ( ! nj_disconnect(&nj ) )
-				nj.err_msg = ERR_DISCONNECT;
+			if ( nj_disconnect(&nj ) )
+				goto refresh;
 
+			nj.err_msg = ERR_DISCONNECT;
 			goto loop;
 		case 'D': /* Disconnect all */
-			while ( nj_disconnect(&nj) );
-			goto loop;
+			if ( ! nj_disconnect_all(&nj) )
+				nj.err_msg = ERR_DISCONNECT;
+
+			goto refresh;
 		case 'j': /* Select next item on list */
 		case KEY_DOWN:
 			w_item_next( selected_window );
+			nj.windows[0].redraw = true;
+			nj.windows[1].redraw = true;
+			nj.need_mark = true;
 			goto loop;
 		case KEY_UP: /* Select previous item on list */
 		case 'k':
 			w_item_previous( selected_window );
+			nj.windows[0].redraw = true;
+			nj.windows[1].redraw = true;
+			nj.need_mark = true;
 			goto loop;
 		case KEY_HOME: /* Select first item on list */
 			selected_window->index = 0;
-			selected_window->redraw = true;
+			nj.windows[0].redraw = true;
+			nj.windows[1].redraw = true;
+			nj.need_mark = true;
 			goto loop;
 		case KEY_END: /* Select last item on list */
 			selected_window->index = selected_window->count - 1;
-			selected_window->redraw = true;
+			nj.windows[0].redraw = true;
+			nj.windows[1].redraw = true;
+			nj.need_mark = true;
 			goto loop;
 		case 'h': /* Select left window */
 		case KEY_LEFT:
@@ -846,16 +908,18 @@ loop:
 
 	if (! nj.want_refresh) goto loop;
 refresh:
-	nj.want_refresh = FALSE;
+	nj.want_refresh = false;
 	if ( ViewMode == VIEW_MODE_GRID )
 		nj.grid_redraw = true;
 
-	free_all_ports(all_list);
+	free_connections( nj.windows[2].list );
+	free_all_ports(all_ports_list);
 	w_cleanup(nj.windows); /* Clean windows lists */
 
 	goto lists;
 quit:
-	free_all_ports(all_list);
+	free_connections( nj.windows[2].list );
+	free_all_ports(all_ports_list);
 	w_cleanup(nj.windows); /* Clean windows lists */
 	jack_deactivate( nj.client );
 	jack_client_close( nj.client );
