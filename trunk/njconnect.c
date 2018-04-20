@@ -586,7 +586,7 @@ void nj_draw_grid ( NJ* nj ) {
 	JSList* list_in  = nj->windows[1].list;
 	JSList* list_con = nj->windows[2].list;
 
-	wclear ( w );
+	werase ( w );
 
 	/* IN */
 	int start_col = get_max_port_name ( list_out ) + 1;
