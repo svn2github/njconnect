@@ -311,14 +311,14 @@ void w_draw(Window* W) {
 void
 w_create(Window* W, int height, int width, int starty, int startx, const char* name, enum WinType type) {
 	W->window_ptr = newwin(height, width, starty, startx);
-	W->selected = FALSE;
+	W->selected = false;
 	W->width = width;
 	W->height = height;
 	W->name = name;
 	W->index = 0;
 	W->type = type;
 	W->redraw = true;
-	//  scrollok(w->window_ptr, TRUE);
+	//  scrollok(w->window_ptr, true);
 }
 
 void
@@ -362,14 +362,14 @@ bool nj_connect( NJ* nj ) {
 	Port* dst = get_selected_port(Wdst);
 	if(!dst) return false;
 
-	if (jack_connect(nj->client, src->name, dst->name) ) return FALSE;
+	if (jack_connect(nj->client, src->name, dst->name) ) return false;
 
 	/* Move selections to next items */
 	w_item_next(Wsrc);
 	w_item_next(Wdst);
 	Wsrc->redraw = true;
 	Wdst->redraw = true;
-	return TRUE;
+	return true;
 }
 
 bool nj_disconnect( NJ* nj ) {
@@ -425,10 +425,10 @@ void nj_select_window( NJ* nj, short new ) {
 
 	if (new == current) return;
 
-	nj->windows[current].selected = FALSE;
+	nj->windows[current].selected = false;
 	nj->windows[current].redraw = true;
 
-	nj->windows[new].selected = TRUE;
+	nj->windows[new].selected = true;
 	nj->windows[new].redraw = true;
 
 	nj->window_selection = new;
@@ -619,7 +619,7 @@ bool init_jack( NJ* nj ) {
 	nj->buffer_size = jack_get_buffer_size( nj->client );
 	nj->rt = jack_is_realtime( nj->client );
 	nj->err_msg = NULL;
-	nj->want_refresh = FALSE;
+	nj->want_refresh = false;
 
 	jack_set_graph_order_callback( nj->client, graph_order_handler, nj );
 	jack_set_buffer_size_callback( nj->client, buffer_size_handler, nj );
@@ -731,7 +731,7 @@ int main() {
 	noecho();
 	getmaxyx(stdscr, rows, cols);
 
-	if (has_colors() == FALSE) {
+	if (has_colors() == false) {
 		ERR_OUT("Your terminal does not support color");
 		ret = -1;
 		goto qxit;
@@ -756,14 +756,14 @@ int main() {
 
 	/* Create Help/Status Window */
 	nj.status_window = newwin(WSTAT_H, WSTAT_W, WSTAT_Y, WSTAT_X);
-	keypad(nj.status_window, TRUE);
+	keypad(nj.status_window, true);
 	wtimeout(nj.status_window, 1000);
 
 	/* Create windows */
 	w_create(nj.windows, WOUT_H, WOUT_W, WOUT_Y, WOUT_Y, "Output Ports", WIN_PORTS);
 	w_create(nj.windows+1, WIN_H, WIN_W, WIN_Y, WIN_X, "Input Ports", WIN_PORTS);
 	w_create(nj.windows+2, WCON_H, WCON_W, WCON_Y, WCON_X, CON_NAME_M, WIN_CONNECTIONS);
-	nj.windows[nj.window_selection].selected = TRUE;
+	nj.windows[nj.window_selection].selected = true;
 
 lists:
 	/* Build ports, connections list */
@@ -902,7 +902,7 @@ loop:
 
 	if (! nj.want_refresh) goto loop;
 refresh:
-	nj.want_refresh = FALSE;
+	nj.want_refresh = false;
 	if ( ViewMode == VIEW_MODE_GRID )
 		nj.grid_redraw = true;
 
