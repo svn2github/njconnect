@@ -375,21 +375,24 @@ bool nj_disconnect( NJ* nj ) {
 	Window* W = nj->windows + 2;
 
 	JSList* list_item = jack_slist_nth(W->list, W->index);
-	if (! list_item) return false;
+	if ( ! list_item) return false;
 
 	Connection* c = list_item->data;
 	int ret = jack_disconnect(nj->client, c->out->name, c->in->name);
 	if ( ret != 0 ) return false;
 
-	/* Move back index if it was last on the list */
-	if (W->index >= W->count - 1)
-		w_item_previous(W);
+	return true;
+}
 
-	W->list = jack_slist_remove_link(W->list, list_item);
-	W->count--;
-	W->redraw = true;
-	nj->need_mark = true;
+bool nj_disconnect_all( NJ* nj ) {
+	Window* W = nj->windows + 2;
 
+	JSList* node;
+	for ( node=W->list; node; node=jack_slist_next(node) ) {
+		Connection* c = node->data;
+		int ret = jack_disconnect(nj->client, c->out->name, c->in->name);
+		if ( ret != 0 ) return false;
+	}
 	return true;
 }
 
@@ -854,13 +857,16 @@ loop:
 			goto loop;
 		case 'd': /* Disconnect */
 		case KEY_BACKSPACE:
-			if ( ! nj_disconnect(&nj ) )
-				nj.err_msg = ERR_DISCONNECT;
+			if ( nj_disconnect(&nj ) )
+				goto refresh;
 
+			nj.err_msg = ERR_DISCONNECT;
 			goto loop;
 		case 'D': /* Disconnect all */
-			while ( nj_disconnect(&nj) );
-			goto loop;
+			if ( ! nj_disconnect_all(&nj) )
+				nj.err_msg = ERR_DISCONNECT;
+
+			goto refresh;
 		case 'j': /* Select next item on list */
 		case KEY_DOWN:
 			w_item_next( selected_window );
