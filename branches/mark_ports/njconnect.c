@@ -282,7 +282,7 @@ void w_draw_list(Window* W) {
 		switch( W->type ) {
 			case WIN_PORTS:;
 				Port* p = node->data;
-				const char* pfmt = p->mark ? "*%%-%d.%ds", : "%%-%d.%ds";
+				const char* pfmt = p->mark ? "*%%-%d.%ds" : "%%-%d.%ds";
 
 				snprintf(fmt, sizeof(fmt), pfmt, cols - 2, cols - 2);
 				mvwprintw(W->window_ptr, row, col, fmt, p->name);
@@ -393,17 +393,18 @@ bool nj_disconnect( NJ* nj ) {
 	return true;
 }
 
+void free_connections( JSList* list_con ) {
+	JSList* node;
+	for ( node=list_con; node; node=jack_slist_next(node) )
+		free(node->data);
+}
+
 void w_cleanup(Window* windows) {
 	short i;
 	Window* w = windows;
 
 	for(i = 0; i < 3; i++, w++) {
 		JSList* l = w->list;
-		if ( w->type == WIN_CONNECTIONS ) {
-			JSList* node;
-			for ( node=w->list; node; node=jack_slist_next(node) )
-				free(node->data);
-		}
 		jack_slist_free(l);
 		w->redraw = true;
 	}
@@ -905,11 +906,13 @@ refresh:
 	if ( ViewMode == VIEW_MODE_GRID )
 		nj.grid_redraw = true;
 
+	free_connections( nj.windows[2].list );
 	free_all_ports(all_list);
 	w_cleanup(nj.windows); /* Clean windows lists */
 
 	goto lists;
 quit:
+	free_connections( nj.windows[2].list );
 	free_all_ports(all_list);
 	w_cleanup(nj.windows); /* Clean windows lists */
 	jack_deactivate( nj.client );
