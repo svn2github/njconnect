@@ -719,7 +719,7 @@ int main() {
 	unsigned short ret, rows, cols;
 	enum ViewMode ViewMode = VIEW_MODE_NORMAL;
 	const char* PortsType = JACK_DEFAULT_MIDI_TYPE;
-	JSList *all_list = NULL;
+	JSList* all_ports_list = NULL;
 	NJ nj;
 	nj.grid_window = NULL;
 	nj.grid_redraw = true;
@@ -767,17 +767,17 @@ int main() {
 
 lists:
 	/* Build ports, connections list */
-	all_list = build_ports( nj.client );
-	w_assign_list( nj.windows, select_ports(all_list, JackPortIsOutput, PortsType) );
-	w_assign_list( nj.windows+1, select_ports(all_list, JackPortIsInput, PortsType) );
-	w_assign_list( nj.windows+2, build_connections( nj.client, all_list, PortsType ) );
+	all_ports_list = build_ports( nj.client );
+	w_assign_list( nj.windows, select_ports(all_ports_list, JackPortIsOutput, PortsType) );
+	w_assign_list( nj.windows+1, select_ports(all_ports_list, JackPortIsInput, PortsType) );
+	w_assign_list( nj.windows+2, build_connections( nj.client, all_ports_list, PortsType ) );
 	nj.need_mark = true;
 
 loop:
 	if ( ViewMode == VIEW_MODE_GRID ) {
 		nj_draw_grid( &nj );
 	} else { /* Assume VIEW_MODE_NORMAL */
-		nj_mark_ports( &nj, all_list );
+		nj_mark_ports( &nj, all_ports_list );
 		nj_redraw_windows( &nj );
 	}
 
@@ -907,13 +907,13 @@ refresh:
 		nj.grid_redraw = true;
 
 	free_connections( nj.windows[2].list );
-	free_all_ports(all_list);
+	free_all_ports(all_ports_list);
 	w_cleanup(nj.windows); /* Clean windows lists */
 
 	goto lists;
 quit:
 	free_connections( nj.windows[2].list );
-	free_all_ports(all_list);
+	free_all_ports(all_ports_list);
 	w_cleanup(nj.windows); /* Clean windows lists */
 	jack_deactivate( nj.client );
 	jack_client_close( nj.client );
