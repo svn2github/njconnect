@@ -732,10 +732,13 @@ void nj_mark_ports ( NJ* nj, JSList* all_ports ) {
 	}
 }
 
-enum ViewMode { VIEW_MODE_NORMAL, VIEW_MODE_GRID };
 int main() {
+	enum {
+		VIEW_MODE_NORMAL,
+		VIEW_MODE_GRID
+	} ViewMode = VIEW_MODE_NORMAL;
+
 	unsigned short ret, rows, cols;
-	enum ViewMode ViewMode = VIEW_MODE_NORMAL;
 	const char* PortsType = JACK_DEFAULT_MIDI_TYPE;
 	JSList* all_ports_list = NULL;
 	NJ nj;
