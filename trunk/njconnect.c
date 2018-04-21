@@ -293,8 +293,6 @@ void w_draw_list(Window* W) {
 					cols/2 - 3, cols/2 - 3, cols/2 - 3, cols/2 - 3);
 				mvwprintw(W->window_ptr, row, col, fmt, c->out->name, c->in->name);
 				break;
-			default:
-				ERR_OUT("Unknown WinType");
 		}
 		wattroff(W->window_ptr, COLOR_PAIR(color));
 		wclrtoeol(W->window_ptr);
