@@ -6,7 +6,7 @@ DESTDIR =
 CFLAGS             += $(shell pkg-config --cflags $(PKG_CONFIG_MODULES))
 LDFLAGS             =
 LIBRARIES           = $(shell pkg-config --libs   $(PKG_CONFIG_MODULES))
-OBJS                = njconnect.o jslist_extra.o window.o
+OBJS                = njconnect.o jslist_extra.o window.o port_connection.o
 
 .PHONY: all,clean
 
