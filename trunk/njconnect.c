@@ -23,14 +23,16 @@
  *
  *****************************************************************************/
 
-#include <ncurses.h>
 #include <string.h>
+#include <ncurses.h>
 #include <jack/jack.h>
 #include <jack/jslist.h>
 #include <stdbool.h>
 
 /* Functions forgotten by Jack-Devs */
 #include "jslist_extra.h"
+
+#include "window.h"
 
 #define APPNAME "njconnect"
 #define VERSION "1.6"
@@ -69,24 +71,6 @@ const char* GRAPH_CHANGED       = "Graph changed";
 const char* SAMPLE_RATE_CHANGED = "Sample rate changed";
 const char* BUFFER_SIZE_CHANGED = "Buffer size changed";
 const char* DEFAULT_STATUS      = "->> Press SHIFT+H or ? for help <<-";
-
-enum WinType {
-	WIN_PORTS,
-	WIN_CONNECTIONS
-};
-
-typedef struct {
-	WINDOW* window_ptr;
-	JSList* list;
-	bool selected;
-	bool redraw;
-	int height;
-	int width;
-	const char * name;
-	unsigned short index;
-	unsigned short count;
-	enum WinType type;
-} Window;
 
 typedef struct {
 	char name[128];
@@ -208,22 +192,6 @@ void free_all_ports(JSList* all_ports) {
 	jack_slist_free(all_ports);
 }
 
-void w_draw_border(Window* W) {
-	int col = (W->width - strlen(W->name) - 4) / 2;
-	if (col < 0) col = 0;
-
-	/* 0, 0 gives default characters for the vertical and horizontal lines */
-	box(W->window_ptr, 0, 0);
-
-	if (W->selected) {
-		wattron(W->window_ptr, WA_BOLD|COLOR_PAIR(4));
-		mvwprintw(W->window_ptr, 0, col, "=[%s]=", W->name);
-		wattroff(W->window_ptr, WA_BOLD|COLOR_PAIR(4));
-	} else {
-		mvwprintw(W->window_ptr, 0, col, " [%s] ", W->name);
-	}
-}
-
 unsigned short
 choose_color( Window* W, JSList* node, bool item_selected ) {
 	bool item_mark = false;
@@ -287,40 +255,8 @@ void w_draw(Window* W) {
 	wrefresh(W->window_ptr);
 }
 
-void
-w_create(Window* W, int height, int width, int starty, int startx, const char* name, enum WinType type) {
-	W->window_ptr = newwin(height, width, starty, startx);
-	W->selected = false;
-	W->width = width;
-	W->height = height;
-	W->name = name;
-	W->index = 0;
-	W->type = type;
-	W->redraw = true;
-	//  scrollok(w->window_ptr, true);
-}
-
-void
-w_assign_list(Window* W, JSList* list) {
-	W->list = list;
-	W->count = jack_slist_length(W->list);
-	W->redraw = true;
-	if (W->index > W->count - 1) W->index = 0;
-}
-
-void
-w_resize(Window* W, int height, int width, int starty, int startx) {
-	//delwin(W->window_ptr);
-	//W->window_ptr = newwin(height, width, starty, startx);
-	wresize(W->window_ptr, height, width);
-	mvwin(W->window_ptr, starty, startx);
-	W->width = width;
-	W->height = height;
-	W->redraw = true;
-}
-
 Port*
-get_selected_port(Window* W) {
+w_get_selected_port(Window* W) {
 	JSList* list = jack_slist_nth(W->list, W->index);
 	if (!list) return NULL;
 
@@ -328,17 +264,14 @@ get_selected_port(Window* W) {
 	return p;
 }
 
-void w_item_next(Window* W) { if (W->index < W->count - 1) W->index++; }
-void w_item_previous(Window* W) { if (W->index > 0) W->index--; }
-
 bool nj_connect( NJ* nj ) {
 	Window* Wsrc = nj->windows;
 	Window* Wdst = nj->windows + 1;
 
-	Port* src = get_selected_port(Wsrc);
+	Port* src = w_get_selected_port(Wsrc);
 	if(!src) return false;
 
-	Port* dst = get_selected_port(Wdst);
+	Port* dst = w_get_selected_port(Wdst);
 	if(!dst) return false;
 
 	if (jack_connect(nj->client, src->name, dst->name) ) return false;
@@ -378,17 +311,6 @@ void free_connections( JSList* list_con ) {
 	JSList* node;
 	for ( node=list_con; node; node=jack_slist_next(node) )
 		free(node->data);
-}
-
-void w_cleanup(Window* windows) {
-	short i;
-	Window* w = windows;
-
-	for(i = 0; i < 3; i++, w++) {
-		JSList* l = w->list;
-		jack_slist_free(l);
-		w->redraw = true;
-	}
 }
 
 void nj_select_window( NJ* nj, short new ) {
@@ -696,8 +618,8 @@ void nj_mark_ports ( NJ* nj, JSList* all_ports ) {
 	}
 
 	/* Mark connected */
-	Port* current_out = get_selected_port( nj->windows );
-	Port* current_in  = get_selected_port( nj->windows + 1 );
+	Port* current_out = w_get_selected_port( nj->windows );
+	Port* current_in  = w_get_selected_port( nj->windows + 1 );
 
 	JSList* list_con = nj->windows[2].list;
 	for ( node=list_con; node; node=jack_slist_next(node) ) {
