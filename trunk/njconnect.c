@@ -29,6 +29,9 @@
 #include <jack/jslist.h>
 #include <stdbool.h>
 
+/* Functions forgotten by Jack-Devs */
+#include "jslist_extra.h"
+
 #define APPNAME "njconnect"
 #define VERSION "1.6"
 
@@ -114,29 +117,6 @@ typedef struct {
 	bool grid_redraw;
 	bool need_mark;
 } NJ;
-
-/* Function forgotten by Jack-Devs */
-JSList* jack_slist_nth(JSList* list, unsigned short n) {
-	unsigned short i = 0;
-	JSList* node = list;
-	while ( node ) {
-		if (i == n) return node;
-		node = jack_slist_next(node);
-		i++;
-	}
-	return NULL;
-}
-
-int jack_slist_find_pos(JSList* list, void *data) {
-	unsigned short i = 0;
-	JSList* node = list;
-	while ( node ) {
-		if (node->data == data) return i;
-		node = jack_slist_next(node);
-		i++;
-	}
-	return -1;
-}
 
 void suppress_jack_log(const char* msg) {
 	/* Just suppress Jack SPAM here ;-) */
