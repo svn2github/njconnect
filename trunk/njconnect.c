@@ -74,7 +74,6 @@ const char* SAMPLE_RATE_CHANGED = "Sample rate changed";
 const char* BUFFER_SIZE_CHANGED = "Buffer size changed";
 const char* DEFAULT_STATUS      = "->> Press SHIFT+H or ? for help <<-";
 
-
 typedef struct {
 	jack_client_t* client;
 	jack_nframes_t sample_rate;

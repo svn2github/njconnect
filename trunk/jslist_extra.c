@@ -23,5 +23,3 @@ int jack_slist_find_pos(JSList* list, void *data) {
 	}
 	return -1;
 }
-
-
