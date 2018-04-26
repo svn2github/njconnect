@@ -39,6 +39,7 @@
 #define VERSION "1.6"
 
 #define KEY_TAB '\t'
+#define KEY_SPACE ' '
 
 #define WOUT_X 0
 #define WOUT_Y 0
@@ -697,7 +698,7 @@ loop:
 		case KEY_RIGHT:
 			nj_select_window( &nj, 1 );
 			goto loop;
-		case ' ': /* Select bottom window */
+		case KEY_SPACE: /* Select bottom window */
 			nj_select_window( &nj, 2 );
 			goto loop;
 	}
