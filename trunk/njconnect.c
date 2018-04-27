@@ -133,9 +133,7 @@ void w_draw_list(Window* W) {
 		switch( W->type ) {
 			case WIN_PORTS:;
 				Port* p = node->data;
-				const char* pfmt = p->mark ? "*%%-%d.%ds" : "%%-%d.%ds";
-
-				snprintf(fmt, sizeof(fmt), pfmt, cols - 2, cols - 2);
+				snprintf(fmt, sizeof(fmt), "%%-%d.%ds", cols - 2, cols - 2);
 				mvwprintw(W->window_ptr, row, col, fmt, p->name);
 				break;
 			case WIN_CONNECTIONS:;
